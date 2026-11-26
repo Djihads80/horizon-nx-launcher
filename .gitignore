@@ -1,0 +1,13 @@
+# Build products: objects, the linked ELF, the .nro, and the romfs it packs (Borealis' fonts and
+# translations are copied in by build.sh; the pictures are drawn by make-assets.py).
+/build/
+/romfs/
+/icon.jpg
+*.nro
+*.elf
+*.nacp
+/gl-probe/build-probe/
+# The Microsoft client ID a local build was given: never committed.
+/build/build_config.hpp
+# The pinned Borealis checkout build.sh makes.
+/.borealis/

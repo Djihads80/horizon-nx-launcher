@@ -1,0 +1,30 @@
+diff --git a/library/include/borealis/application.hpp b/library/include/borealis/application.hpp
+index 3dc9ceb..c7fcd56 100644
+--- a/library/include/borealis/application.hpp
++++ b/library/include/borealis/application.hpp
+@@ -92,6 +92,9 @@ class Application
+     static LibraryViewsThemeVariantsWrapper* getThemeVariantsWrapper();
+     static ThemeVariant getThemeVariant();
+ 
++    /// Overrides the system's light/dark choice for this app (the launcher's Appearance setting).
++    static void setThemeVariant(ThemeVariant variant);
++
+     static int loadFont(const char* fontName, const char* filePath);
+     static int loadFontFromMemory(const char* fontName, void* data, size_t size, bool freeData);
+     static int findFont(const char* fontName);
+diff --git a/library/lib/application.cpp b/library/lib/application.cpp
+index 693ea65..497fc3c 100644
+--- a/library/lib/application.cpp
++++ b/library/lib/application.cpp
+@@ -902,6 +902,11 @@ ThemeVariant Application::getThemeVariant()
+     return Application::currentThemeVariant;
+ }
+ 
++void Application::setThemeVariant(ThemeVariant variant)
++{
++    Application::currentThemeVariant = variant;
++}
++
+ int Application::loadFont(const char* fontName, const char* filePath)
+ {
+     return nvgCreateFont(Application::vg, fontName, filePath);

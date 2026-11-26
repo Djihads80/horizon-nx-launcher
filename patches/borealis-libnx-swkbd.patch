@@ -1,0 +1,12 @@
+diff --git a/library/lib/swkbd.cpp b/library/lib/swkbd.cpp
+index fac1c69..e39a094 100644
+--- a/library/lib/swkbd.cpp
++++ b/library/lib/swkbd.cpp
+@@ -42,7 +42,6 @@ static SwkbdConfig createSwkbdBaseConfig(std::string headerText, std::string sub
+     swkbdConfigSetSubText(&config, subText.c_str());
+     swkbdConfigSetStringLenMax(&config, maxStringLength);
+     swkbdConfigSetInitialText(&config, initialText.c_str());
+-    swkbdConfigSetStringLenMaxExt(&config, 1);
+     swkbdConfigSetBlurBackground(&config, true);
+ 
+     return config;
