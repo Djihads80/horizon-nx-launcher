@@ -27,8 +27,12 @@ build_borealis() {
 # on Linux, so path() ("sdmc:/switch/horizon/...") needs no change.
 card() {
     mkdir -p "$SCRATCH/sdmc:/switch/horizon/instances/minecraft-26-3"
-    mkdir -p "$SCRATCH/romfs:"
-    ln -sfn "$ROOT/romfs" "$SCRATCH/romfs:"/ 2>/dev/null || true
+
+    # Where the app looks for its pictures ("romfs:/...") and where the library looks for its fonts
+    # ("resources/..."): plain symlinks, made once. With a trailing slash ln follows the link and
+    # writes a link back into the real romfs, which then packs itself into the NRO forever.
+    [ -e "$SCRATCH/romfs:" ] || ln -s "$ROOT/romfs" "$SCRATCH/romfs:"
+    [ -e "$SCRATCH/resources" ] || ln -s "$ROOT/romfs" "$SCRATCH/resources"
     if [ ! -f "$SCRATCH/sdmc:/switch/horizon/launcher.json" ]; then
         cat > "$SCRATCH/sdmc:/switch/horizon/launcher.json" <<'EOF'
 {
