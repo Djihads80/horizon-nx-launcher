@@ -26,7 +26,7 @@ APP_TITLE   := Horizon Launcher
 APP_AUTHOR  := Horizon
 APP_VERSION := 1.0.0
 
-BOREALIS_PATH ?= ../borealis-legacy
+BOREALIS_PATH ?= borealis
 ICON        ?= $(TOPDIR)/icon.jpg
 
 ARCH      := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE

@@ -83,11 +83,13 @@ build() {
     build_config
 
     echo "==> building the NRO${HORIZON_MSA_CLIENT_ID:+ (with a Microsoft client ID)}"
+    # BOREALIS_PATH is relative to the repository root (the Makefile prefixes it with TOPDIR), and
+    # the container mounts the checkout inside it as `borealis`.
     "$ENGINE" run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
         -v "$ROOT:/repo" -v "$BOREALIS:/repo/borealis" \
         -w /repo \
         -e DEVKITPRO=/opt/devkitpro \
-        "$IMAGE" bash -lc 'make -j"$(nproc)" BOREALIS_PATH=../borealis'
+        "$IMAGE" bash -lc 'make -j"$(nproc)" BOREALIS_PATH=borealis'
 
     echo
     echo "==> $APP/horizon-launcher.nro"
