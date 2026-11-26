@@ -5,6 +5,8 @@
 #include "util.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <map>
 
 namespace launcher
 {
@@ -56,20 +58,45 @@ class Field : public brls::InputListItem
     std::function<void(std::string)> changed;
 };
 
-/// A row for one instance: its picture, name and time played. Drawn here rather than as a list item
-/// because a list item sizes its picture from the row height (so it sits off-centre and can spill
-/// past the focus ring) and draws its description outside that ring.
-class InstanceRow : public brls::View
+/// Pictures by path, each loaded once. A path that fails is remembered as failed too: retrying a
+/// missing or broken file in draw() on every frame is a freeze, which is exactly what a bad icon used
+/// to look like — the app stopped instead of drawing nothing there.
+std::map<std::string, int>& pictures()
+{
+    static std::map<std::string, int> cache;
+    return cache;
+}
+
+int picture(NVGcontext* vg, const std::string& file)
+{
+    if (file.empty())
+        return 0;
+
+    auto& cache = pictures();
+    auto found  = cache.find(file);
+    if (found != cache.end())
+        return found->second;
+
+    const int image = nvgCreateImage(vg, file.c_str(), NVG_IMAGE_NEAREST);
+    cache[file]     = image;
+    return image;
+}
+
+/// A row with a picture: its name, a line under it, and what it is (in use, change). Drawn here
+/// rather than as a list item because a list item sizes its picture from the row height (so it sits
+/// off-centre and can spill past the focus ring) and draws its description outside that ring.
+class Row : public brls::View
 {
   public:
-    InstanceRow(const Instance& instance, std::string value, std::function<void()> onClick)
-        : iconFile(ui::iconPath(instance))
-        , name(instance.name)
-        , playtime(ui::playtimeText(instance.played))
+    Row(std::string file, std::string title, std::string detail, std::string value,
+        std::function<void()> onClick)
+        : iconFile(std::move(file))
+        , title(std::move(title))
+        , detail(std::move(detail))
         , value(std::move(value))
         , onClick(std::move(onClick))
     {
-        this->setHeight(96);
+        this->setHeight(this->detail.empty() ? 76 : 96);
         this->registerAction("OK", brls::Key::A, [this] {
             if (this->onClick)
                 this->onClick();
@@ -79,6 +106,17 @@ class InstanceRow : public brls::View
 
     View* getDefaultFocus() override { return this; }
 
+    /// What a row shows can change under it (a picture picked, a name edited): update it in place.
+    void set(std::string file, std::string title, std::string detail, std::string value)
+    {
+        this->iconFile = std::move(file);
+        this->title    = std::move(title);
+        this->detail   = std::move(detail);
+        this->value    = std::move(value);
+        this->setHeight(this->detail.empty() ? 76 : 96);
+        this->invalidate();
+    }
+
     void draw(NVGcontext* vg, int x, int y, unsigned width, unsigned height, brls::Style* style,
         brls::FrameContext* ctx) override
     {
@@ -87,7 +125,7 @@ class InstanceRow : public brls::View
         // Exactly centred in the row, whatever the row's height is.
         const int iconY = y + ((int)height - iconSize) / 2;
 
-        const int image = this->texture(vg);
+        const int image = picture(vg, this->iconFile);
         nvgBeginPath(vg);
         nvgRect(vg, (float)iconX, (float)iconY, (float)iconSize, (float)iconSize);
         if (image != 0)
@@ -104,11 +142,15 @@ class InstanceRow : public brls::View
 
         nvgFontSize(vg, 26.0f);
         nvgFillColor(vg, ctx->theme->textColor);
-        nvgText(vg, textX, (float)y + height * 0.38f, this->name.c_str(), nullptr);
+        nvgText(vg, textX, this->detail.empty() ? (float)y + height / 2.0f : (float)y + height * 0.38f,
+            this->title.c_str(), nullptr);
 
-        nvgFontSize(vg, 19.0f);
-        nvgFillColor(vg, ctx->theme->descriptionColor);
-        nvgText(vg, textX, (float)y + height * 0.68f, this->playtime.c_str(), nullptr);
+        if (!this->detail.empty())
+        {
+            nvgFontSize(vg, 19.0f);
+            nvgFillColor(vg, ctx->theme->descriptionColor);
+            nvgText(vg, textX, (float)y + height * 0.68f, this->detail.c_str(), nullptr);
+        }
 
         if (!this->value.empty())
         {
@@ -121,29 +163,76 @@ class InstanceRow : public brls::View
     }
 
   private:
-    int texture(NVGcontext* vg)
-    {
-        if (this->iconFile.empty())
-            return 0;
-        if (this->image != 0 && this->forFile == this->iconFile)
-            return this->image;
-
-        if (this->image != 0)
-        {
-            nvgDeleteImage(vg, this->image);
-            this->image = 0;
-        }
-
-        this->image   = nvgCreateImage(vg, this->iconFile.c_str(), NVG_IMAGE_NEAREST);
-        this->forFile = this->iconFile;
-        return this->image;
-    }
-
-    std::string iconFile, name, playtime, value;
+    std::string iconFile, title, detail, value;
     std::function<void()> onClick;
-    int image = 0;
-    std::string forFile;
 };
+
+/// A picture an instance can wear: none, one of the launcher's, or one from the SD card.
+struct Choice
+{
+    std::string label;   // what the picker calls it
+    std::string value;   // what the instance keeps, and what "in use" is compared with
+    std::string picture; // the file to draw, empty for none
+};
+
+std::string capitalised(const std::string& text)
+{
+    std::string out = text;
+    if (!out.empty())
+        out[0] = (char)std::toupper((unsigned char)out[0]);
+    return out;
+}
+
+/// The pictures on offer: the launcher's own first, then whatever PNGs are in the SD card's icons
+/// folder. PNG only: a picture dropped in as a phone photo is tens of megabytes decoded, which the
+/// console takes seconds over — it reads as a freeze, so those are not offered.
+std::vector<Choice> iconChoices()
+{
+    std::vector<Choice> choices;
+    choices.push_back({ "None", "", "" });
+
+    for (const char* icon : ICONS)
+        choices.push_back({ capitalised(icon), icon, asset("img/icons/" + std::string(icon) + ".png") });
+
+    for (const std::string& file : listDir(path("icons")))
+        if (endsWith(file, ".png"))
+            choices.push_back(
+                { ellipsis(file, 24), path("icons") + "/" + file, path("icons") + "/" + file });
+
+    return choices;
+}
+
+/// What the instance is wearing now, in words: "None", "Grass", or the file's name.
+std::string pictureLabel(const Instance& instance)
+{
+    if (instance.icon.empty())
+        return "None";
+
+    const bool fromCard = instance.icon.find('/') != std::string::npos
+        || instance.icon.find(':') != std::string::npos;
+    if (!fromCard)
+        return capitalised(instance.icon);
+
+    const size_t slash = instance.icon.find_last_of('/');
+    return slash == std::string::npos ? instance.icon : instance.icon.substr(slash + 1);
+}
+
+/// A page of rows to pick from, pushed over the screen that asked for it.
+void pushChoices(const std::string& heading, const std::string& note, std::vector<brls::View*> rows)
+{
+    brls::List* list = new brls::List();
+    list->setMargins(24, 24, 24, 24);
+    if (!heading.empty())
+        list->addView(new brls::Header(heading));
+    if (!note.empty())
+        list->addView(ui::text(note, true, 16));
+    for (brls::View* row : rows)
+        list->addView(row);
+
+    brls::Application::pushView(list);
+    bindBack(list);
+}
+
 
 
 } // namespace
@@ -198,30 +287,26 @@ void PlayPage::rebuild()
     const std::string id = instance->id;
 
     // The instance this launcher would start: its picture, its name, how long it has been played.
-    // Picking the row picks another; changing them is the Instances tab's job.
-    std::vector<std::string> names;
-    unsigned selected = 0;
-    for (size_t i = 0; i < config.instances.size(); i++)
-    {
-        names.push_back(config.instances[i].name);
-        if (config.instances[i].id == id)
-            selected = (unsigned)i;
-    }
-
-    brls::View* picker = new InstanceRow(*instance,
-        config.instances.size() > 1 ? "Change" : "",
-        [this, names, selected] {
-            brls::Dropdown::open(
-                "Instance", names,
-                [this](int index) {
-                    auto& config = Config::get();
-                    if (index < 0 || index >= (int)config.instances.size())
-                        return;
-                    config.selected = config.instances[index].id;
-                    config.save();
-                    this->rebuild();
-                },
-                selected);
+    // Picking the row picks another, with the same pictures the Instances tab shows; changing them
+    // is that tab's job.
+    brls::View* picker = new Row(ui::iconPath(*instance), instance->name,
+        ui::playtimeText(instance->played), config.instances.size() > 1 ? "Change" : "",
+        [this, id] {
+            std::vector<brls::View*> rows;
+            for (const Instance& candidate : Config::get().instances)
+            {
+                const std::string candidateId = candidate.id;
+                rows.push_back(new Row(ui::iconPath(candidate), candidate.name,
+                    ui::playtimeText(candidate.played), candidate.id == id ? "Playing" : "",
+                    [this, candidateId] {
+                        auto& config = Config::get();
+                        config.selected = candidateId;
+                        config.save();
+                        brls::Application::popView();
+                        this->rebuild();
+                    }));
+            }
+            pushChoices("Instance", "Which one Play starts.", rows);
         });
     this->addView(picker);
 
@@ -304,8 +389,9 @@ void InstancesPage::rebuild()
     for (const Instance& instance : config.instances)
     {
         const std::string id = instance.id;
-        brls::View* row = new InstanceRow(instance,
-            instance.id == config.selected ? "Selected" : "", [this, id] { this->edit(id); });
+        brls::View* row     = new Row(ui::iconPath(instance), instance.name,
+                ui::playtimeText(instance.played), instance.id == config.selected ? "Selected" : "",
+                [this, id] { this->edit(id); });
         this->addView(row);
     }
 
@@ -364,38 +450,10 @@ void InstancesPage::edit(const std::string& instanceId)
                 "Shown here and on the Play tab.", 48, {});
             this->addView(name);
 
-            // The picture: the launcher's own, one from the SD card's icons folder, or none.
-            std::vector<std::string> labels = { "None" };
-            std::vector<std::string> values = { "" };
-            for (const char* icon : ICONS)
-            {
-                std::string label = icon;
-                if (!label.empty())
-                    label[0] = (char)std::toupper((unsigned char)label[0]);
-                labels.push_back(label);
-                values.push_back(icon);
-            }
-            for (const std::string& file : listDir(path("icons")))
-                if (endsWith(file, ".png") || endsWith(file, ".jpg"))
-                {
-                    labels.push_back(ellipsis(file, 24));
-                    values.push_back(path("icons") + "/" + file);
-                }
-
-            unsigned selected = 0;
-            for (size_t i = 0; i < values.size(); i++)
-                if (values[i] == instance->icon)
-                    selected = (unsigned)i;
-
-            iconValues = values;
-            iconChoice = selected;
-
-            auto* picture = new brls::SelectListItem("Picture", labels, selected,
-                "A picture on the SD card goes in sdmc:/switch/horizon/icons/.");
-            picture->getValueSelectedEvent()->subscribe([this](int index) {
-                if (index >= 0)
-                    this->iconChoice = (size_t)index;
-            });
+            // The picture: the launcher's own, one from the SD card's icons folder, or none. It opens
+            // a page of the pictures themselves, so the choice is not a name read blind.
+            picture = new Row(ui::iconPath(*instance), pictureLabel(*instance), "", "Choose",
+                [this, id] { this->choosePicture(id); });
             this->addView(picture);
 
             arguments = new Field("These arguments", instance->args, "This instance's arguments",
@@ -439,11 +497,49 @@ void InstancesPage::edit(const std::string& instanceId)
                 instance->name = trim(name->getValue());
             if (arguments)
                 instance->args = trim(arguments->getValue());
-            if (iconChoice < iconValues.size())
-                instance->icon = iconValues[iconChoice];
 
             config.save();
             brls::Application::notify("Saved");
+            brls::Application::popView();
+            refreshPages();
+        }
+
+        /// The pictures on offer, each drawn, so the choice is made by looking at it. Picking one
+        /// saves it at once and the row behind shows it as soon as this page pops.
+        void choosePicture(const std::string& instanceId)
+        {
+            const Instance* instance = Config::get().find(instanceId);
+            if (!instance)
+                return;
+            const std::string current = instance->icon;
+
+            std::vector<brls::View*> rows;
+            for (const Choice& choice : iconChoices())
+            {
+                const std::string value = choice.value;
+                rows.push_back(new Row(choice.picture, choice.label, "",
+                    value == current ? "In use" : "",
+                    [this, instanceId, value] { this->usePicture(instanceId, value); }));
+            }
+
+            pushChoices("Picture", "PNG files in sdmc:/switch/horizon/icons/ are listed too.", rows);
+        }
+
+        void usePicture(const std::string& instanceId, const std::string& value)
+        {
+            auto& config      = Config::get();
+            Instance* instance = config.find(instanceId);
+            if (!instance)
+                return;
+
+            instance->icon = value;
+            config.save();
+
+            // The row this page was opened from, updated in place: the screen underneath stays as it
+            // was, with the new picture on it.
+            if (this->picture)
+                this->picture->set(ui::iconPath(*instance), pictureLabel(*instance), "", "Choose");
+
             brls::Application::popView();
             refreshPages();
         }
@@ -455,10 +551,9 @@ void InstancesPage::edit(const std::string& instanceId)
         }
 
         std::string id;
-        std::vector<std::string> iconValues;
-        size_t iconChoice = 0;
-        Field* name = nullptr;
-        Field* arguments = nullptr;
+        Row* picture      = nullptr;
+        Field* name       = nullptr;
+        Field* arguments  = nullptr;
     };
 
     Edit::live() = this;
