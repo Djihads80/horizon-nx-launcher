@@ -51,6 +51,15 @@ EOF
 }
 
 build_app() {
+    # HORIZON_ASAN=1 builds with AddressSanitizer: a heap that gets corrupted is otherwise only found
+    # by the crash it causes somewhere else, hours later.
+    local san=""
+    if [ "${HORIZON_ASAN:-0}" = "1" ]; then
+        san="-fsanitize=address -fno-omit-frame-pointer"
+        OUT="$HERE/scratch-asan"
+        mkdir -p "$OUT/obj"
+    fi
+
     mkdir -p "$OUT/obj"
     local sources=("$ROOT"/source/*.cpp "$ROOT"/third_party/qrcodegen.cpp)
     local objects=()
@@ -58,7 +67,7 @@ build_app() {
         local object="$OUT/obj/$(basename "${source%.cpp}").o"
         objects+=("$object")
         if [ ! -f "$object" ] || [ "$source" -nt "$object" ]; then
-            g++ -std=c++17 -g -O1 -c "$source" -o "$object" \
+            g++ -std=c++17 -g -O1 $san -c "$source" -o "$object" \
                 -I "$HERE/compat" -I "$ROOT/source" -I "$ROOT/third_party" \
                 -I "$BOREALIS/library/include" -I "$BOREALIS/library/include/borealis/extern" \
                 -I "$BOREALIS/library/lib/extern/fmt/include" \
@@ -68,7 +77,7 @@ build_app() {
 
     # Borealis' own objects, minus the example's main().
     mapfile -t borealis_objects < <(find "${BR_BLD:-$OUT/borealis}" -name '*.o' ! -name '*example*' | sort)
-    g++ "${objects[@]}" "${borealis_objects[@]}" -o "$OUT/horizon-launcher" \
+    g++ $san "${objects[@]}" "${borealis_objects[@]}" -o "$OUT/horizon-launcher" \
         $(pkg-config --libs glfw3) -lcurl -lpthread -ldl -lm
     echo "==> $OUT/horizon-launcher"
 }
