@@ -298,15 +298,68 @@ void Config::refreshAccounts()
             account = uuid;
     }
 
+    this->importDesktopAccounts();
     loadAccountFiles();
     if (account.empty() && !accounts.empty())
         account = accounts.front().uuid;
+}
+
+void Config::importDesktopAccounts()
+{
+    std::string text;
+    if (!readFile(path("accounts.json"), text))
+        return;
+
+    json value = json::parse(text, nullptr, false);
+    if (value.is_discarded() || !value.is_object())
+        return;
+
+    int imported = 0;
+    for (const json& entry : value.value("accounts", json::array()))
+    {
+        if (!entry.is_object())
+            continue;
+
+        Account found { entry.value("uuid", ""), entry.value("name", "") };
+        if (found.uuid.empty() || found.name.empty())
+            continue;
+
+        // Only the list entry: the desktop launcher keeps its tokens in the PC's keychain, so there
+        // is no session here to copy, and writing a half one would make the game call it damaged.
+        if (readFile(accountFile(found.uuid), text))
+            continue;
+
+        json saved = { { "name", found.name }, { "uuid", found.uuid } };
+        if (writeFileAtomic(accountFile(found.uuid), saved.dump(2)))
+            ++imported;
+    }
+
+    if (imported > 0)
+        log("accounts: imported %d from accounts.json", imported);
+}
+
+bool Config::hasSession(const std::string& uuid) const
+{
+    std::string text;
+    if (!readFile(accountFile(uuid), text))
+        return false;
+
+    json value = json::parse(text, nullptr, false);
+    if (value.is_discarded() || !value.is_object())
+        return false;
+
+    return !value.value("minecraft_token", "").empty()
+        && !value.value("refresh_token", "").empty() && value.contains("expires_at");
 }
 
 bool Config::activateAccount(const std::string& uuid)
 {
     std::string text;
     if (!readFile(accountFile(uuid), text))
+        return false;
+
+    // The game cannot sign in from a list entry: it needs the session's three fields.
+    if (!this->hasSession(uuid))
         return false;
 
     // The game reads its own file from the folder it runs in.

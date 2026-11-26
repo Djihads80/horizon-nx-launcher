@@ -67,7 +67,13 @@ class Config
     /// Reads accounts/*.json and the game's account.json (which the game renews), so the launcher
     /// lists every account, with fresh tokens.
     void refreshAccounts();
+    /// Points the game at this account: copies it over the game's own account.json. False when there
+    /// is no saved sign-in for it to copy (see [`hasSession`](#hasSession)).
     bool activateAccount(const std::string& uuid);
+    /// Whether an account file can actually start the game signed in: the game's format needs its
+    /// refresh token, its Minecraft token and the latter's expiry, and a file missing them reads as
+    /// "the saved account is damaged" in the game.
+    bool hasSession(const std::string& uuid) const;
     void forgetAccount(const std::string& uuid);
 
     std::string accountFile(const std::string& uuid) const;
@@ -86,6 +92,11 @@ class Config
   private:
     std::string importAccountFile(const std::string& text);
     void loadAccountFiles();
+    /// Accounts from the desktop launcher's accounts.json, which people bring over from a PC: it
+    /// lists uuid, name, skin and cape, and nothing this launcher has to keep but the first two.
+    /// Imported so a known account shows up (with its real skin, which the header fetches by uuid)
+    /// even though only a sign-in can give it a session.
+    void importDesktopAccounts();
 };
 
 } // namespace launcher

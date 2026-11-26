@@ -788,6 +788,9 @@ void SettingsPage::switchAccount(int index)
         brls::Application::notify("Now playing as " + config.accounts[(size_t)index].name);
         this->rebuild();
     }
+    else if (!config.hasSession(uuid))
+        ui::alert("That account has no sign-in on this console yet. Sign in with it (Minus) and it "
+                  "will play as it is selected.");
     else
         ui::alert("That account's saved sign-in could not be read.");
 }
