@@ -89,9 +89,15 @@ def icon(name, painter):
 def main():
     save(launcher(), ROMFS, "launcher.png")
 
-    # The header draws it small; the same picture scaled by the UI.
-    for name, painter in ICONS.items():
-        save(icon(name, painter), ROMFS, "icons", name + ".png")
+    # The six drawn pictures are a starting set, not an icon pack: a folder that already holds PNGs
+    # (the player's own, or a texture pack's) is left exactly as it is.
+    folder = os.path.join(ROMFS, "icons")
+    existing = [f for f in os.listdir(folder) if f.lower().endswith(".png")] if os.path.isdir(folder) else []
+    if existing:
+        print(f"  kept {len(existing)} icons already in romfs/img/icons")
+    else:
+        for name, painter in ICONS.items():
+            save(icon(name, painter), ROMFS, "icons", name + ".png")
 
     # The .nro's HOME menu icon has to be a JPEG of 256x256.
     launcher().convert("RGB").save(os.path.join(HERE, "icon.jpg"), quality=92)

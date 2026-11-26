@@ -15,8 +15,6 @@ namespace launcher
 namespace
 {
 
-const char* const ICONS[] = { "grass", "stone", "diamond", "heart", "pickaxe", "star" };
-
 bool endsWith(const std::string& text, const std::string& suffix)
 {
     return text.size() >= suffix.size() &&
@@ -217,26 +215,51 @@ std::string capitalised(const std::string& text)
     return out;
 }
 
-/// The pictures on offer: the launcher's own first, then whatever PNGs are in the SD card's icons
-/// folder. PNG only: a picture dropped in as a phone photo is tens of megabytes decoded, which the
-/// console takes seconds over — it reads as a freeze, so those are not offered.
+/// A picture's name without its extension: "Ancient Debris.png" reads "Ancient Debris", and a
+/// lowercase one is capitalised so the list does not start every row in lowercase.
+std::string pictureName(const std::string& file)
+{
+    std::string name = file;
+    if (endsWith(name, ".png"))
+        name = name.substr(0, name.size() - 4);
+    return capitalised(name);
+}
+
+/// The PNGs in a folder, in name order. Nothing is listed in the code: a file dropped into either
+/// folder is offered the next time the picker opens.
+std::vector<std::string> picturesIn(const std::string& folder)
+{
+    std::vector<std::string> names;
+    for (const std::string& file : listDir(folder))
+        if (endsWith(file, ".png"))
+            names.push_back(file);
+
+    std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) {
+        return lower(a) < lower(b);
+    });
+    return names;
+}
+
+/// The pictures on offer: the ones packed into the app first (`romfs/img/icons`), then the SD card's
+/// `switch/horizon/icons`. PNG only: a picture dropped in as a phone photo is tens of megabytes
+/// decoded, which the console takes seconds over — it reads as a freeze, so those are not offered.
 std::vector<Choice> iconChoices()
 {
     std::vector<Choice> choices;
     choices.push_back({ "None", "", "" });
 
-    for (const char* icon : ICONS)
-        choices.push_back({ capitalised(icon), icon, asset("img/icons/" + std::string(icon) + ".png") });
+    for (const std::string& file : picturesIn(asset("img/icons")))
+        choices.push_back({ pictureName(file), file.substr(0, file.size() - 4),
+            asset("img/icons/" + file) });
 
-    for (const std::string& file : listDir(path("icons")))
-        if (endsWith(file, ".png"))
-            choices.push_back(
-                { ellipsis(file, 24), path("icons") + "/" + file, path("icons") + "/" + file });
+    for (const std::string& file : picturesIn(path("icons")))
+        choices.push_back(
+            { pictureName(file), path("icons") + "/" + file, path("icons") + "/" + file });
 
     return choices;
 }
 
-/// What the instance is wearing now, in words: "None", "Grass", or the file's name.
+/// What the instance is wearing now, in words: "None", "Grass", "Ancient Debris".
 std::string pictureLabel(const Instance& instance)
 {
     if (instance.icon.empty())
@@ -248,7 +271,7 @@ std::string pictureLabel(const Instance& instance)
         return capitalised(instance.icon);
 
     const size_t slash = instance.icon.find_last_of('/');
-    return slash == std::string::npos ? instance.icon : instance.icon.substr(slash + 1);
+    return pictureName(slash == std::string::npos ? instance.icon : instance.icon.substr(slash + 1));
 }
 
 /// A list of rows to choose from. It takes the first choice and nothing else, and leaves itself a
@@ -325,6 +348,8 @@ void pushChoices(const std::string& heading, const std::string& note,
 /// The page of pictures an instance can wear, `current` marked "in use"; `pick` gets what was chosen.
 void pushPictureChooser(const std::string& current, std::function<void(std::string)> pick)
 {
+    log("pictures: %zu on offer", iconChoices().size());
+
     pushChoices("Picture", "PNG files in sdmc:/switch/horizon/icons/ are listed too.", std::move(pick),
         [current](ChooserPage* page) {
             for (const Choice& choice : iconChoices())
