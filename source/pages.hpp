@@ -33,9 +33,13 @@ class PlayPage : public brls::List
     PlayPage();
     ~PlayPage() override;
     void rebuild();
+    /// Brings the rows up to date without replacing them: a rebuild deletes the row that has focus,
+    /// and a page whose focused row has been deleted answers nothing.
+    void refresh();
 
   private:
     void play(const std::string& instanceId);
+    brls::View* pickerRow = nullptr;
     void askArguments();
 
     AlivePtr alive = std::make_shared<Alive>();
@@ -48,6 +52,7 @@ class InstancesPage : public brls::List
     InstancesPage();
     ~InstancesPage() override;
     void rebuild();
+    void refresh();
     /// Focus the first row: after rebuild() the rows are new objects.
     void focusFirst();
 
@@ -56,6 +61,9 @@ class InstancesPage : public brls::List
     void edit(const std::string& instanceId);
     void remove(const std::string& instanceId);
     void select(const std::string& instanceId);
+
+    /// One row per instance, kept between refreshes so a refresh never deletes what has focus.
+    std::vector<brls::View*> rows;
 
     AlivePtr alive = std::make_shared<Alive>();
 };

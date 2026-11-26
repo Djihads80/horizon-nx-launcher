@@ -365,9 +365,9 @@ InstancesPage* liveInstances = nullptr;
 void refreshPages()
 {
     if (livePlay)
-        livePlay->rebuild();
+        livePlay->refresh();
     if (liveInstances)
-        liveInstances->rebuild();
+        liveInstances->refresh();
 }
 
 // ----- Play ----------------------------------------------------------------------------------
@@ -386,9 +386,25 @@ PlayPage::~PlayPage()
     this->alive->flag = false;
 }
 
+void PlayPage::refresh()
+{
+    auto& config       = Config::get();
+    Instance* instance = config.current();
+    if (!instance || !this->pickerRow)
+    {
+        this->rebuild();
+        return;
+    }
+
+    static_cast<Row*>(this->pickerRow)
+        ->set(ui::iconPath(*instance), instance->name, ui::playtimeText(instance->played),
+            config.instances.size() > 1 ? "Change" : "");
+}
+
 void PlayPage::rebuild()
 {
     log("page: play");
+    this->pickerRow = nullptr;
     this->clear();
 
     auto& config = Config::get();
@@ -413,10 +429,11 @@ void PlayPage::rebuild()
                 auto& config    = Config::get();
                 config.selected = chosen;
                 config.save();
-                this->rebuild();
+                this->refresh();
             });
         });
     this->addView(picker);
+    this->pickerRow = picker;
 
     // Play.
     brls::Button* play = new brls::Button(brls::ButtonStyle::PRIMARY);
@@ -481,9 +498,28 @@ InstancesPage::~InstancesPage()
     this->alive->flag = false;
 }
 
+void InstancesPage::refresh()
+{
+    auto& config = Config::get();
+    if (this->rows.size() != config.instances.size())
+    {
+        this->rebuild();
+        return;
+    }
+
+    for (size_t i = 0; i < config.instances.size(); i++)
+    {
+        const Instance& instance = config.instances[i];
+        static_cast<Row*>(this->rows[i])
+            ->set(ui::iconPath(instance), instance.name, ui::playtimeText(instance.played),
+                instance.id == config.selected ? "Selected" : "");
+    }
+}
+
 void InstancesPage::rebuild()
 {
     log("page: instances");
+    this->rows.clear();
     this->clear();
 
     auto& config = Config::get();
@@ -501,6 +537,7 @@ void InstancesPage::rebuild()
                 ui::playtimeText(instance.played), instance.id == config.selected ? "Selected" : "",
                 [this, id] { this->edit(id); });
         this->addView(row);
+        this->rows.push_back(row);
     }
 
     this->addView(ui::item("New instance…", "Another way to play, with its own folder.",
@@ -518,6 +555,8 @@ void InstancesPage::create()
         config.selected = id;
         config.save();
         this->rebuild();
+        // New rows: the old ones, and whatever had focus among them, are gone.
+        this->focusFirst();
         brls::Application::notify("Instance created");
         refreshPages();
     });
@@ -624,11 +663,7 @@ void InstancesPage::edit(const std::string& instanceId)
                 return;
             this->left = true;
 
-            brls::Application::popView(brls::ViewAnimation::FADE, [] {
-                refreshPages();
-                if (liveInstances)
-                    liveInstances->focusFirst();
-            });
+            brls::Application::popView(brls::ViewAnimation::FADE, [] { refreshPages(); });
         }
 
         /// The pictures on offer, each drawn, so the choice is made by looking at it. Picking one
