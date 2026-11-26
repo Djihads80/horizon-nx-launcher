@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <memory>
 
 namespace launcher
 {
@@ -92,11 +93,16 @@ int picture(NVGcontext* vg, const std::string& file)
 class Gate
 {
   public:
-    bool open() const { return this->isOpen; }
+    /// True once the page has settled and nobody has chosen yet. A held button reaches a row more
+    /// than once — two pops from one press took the chooser *and* the screen under it away, which is
+    /// what left the app on a page with no focus.
+    bool ready() const { return this->isOpen && !this->isUsed; }
+    void use() { this->isUsed = true; }
 
   private:
     friend class ChooserPage;
     bool isOpen = false;
+    bool isUsed = false;
 };
 
 /// A row with a picture: its name, a line under it, and what it is (in use, change). Drawn here
@@ -106,7 +112,7 @@ class Row : public brls::View
 {
   public:
     Row(std::string file, std::string title, std::string detail, std::string value,
-        std::function<void()> onClick, Gate* gate = nullptr)
+        std::function<void()> onClick, std::shared_ptr<Gate> gate = nullptr)
         : gate(gate)
         , iconFile(std::move(file))
         , title(std::move(title))
@@ -116,8 +122,12 @@ class Row : public brls::View
     {
         this->setHeight(this->detail.empty() ? 56 : 96);
         this->registerAction("OK", brls::Key::A, [this] {
-            if (this->gate && !this->gate->open())
-                return true; // the press that opened the page is still down
+            if (this->gate)
+            {
+                if (!this->gate->ready())
+                    return true; // still opening, or already chosen: one press, one choice
+                this->gate->use();
+            }
             if (this->onClick)
                 this->onClick();
             return true;
@@ -184,7 +194,9 @@ class Row : public brls::View
     }
 
   private:
-    Gate* gate = nullptr;
+    // Held, not pointed at: the rows outlive the function that made the page, and a gate on its
+    // stack was gone by the time the first frame asked whether it was open.
+    std::shared_ptr<Gate> gate;
     std::string iconFile, title, detail, value;
     std::function<void()> onClick;
 };
@@ -239,85 +251,105 @@ std::string pictureLabel(const Instance& instance)
     return slash == std::string::npos ? instance.icon : instance.icon.substr(slash + 1);
 }
 
-/// A list of rows to choose from: it opens its gate after a couple of frames, and closes itself when
-/// the page is asked to.
+/// A list of rows to choose from. It takes the first choice and nothing else, and leaves itself a
+/// frame later: one press reached more than one row (a held button is dispatched again), and two pops
+/// from a single press took the chooser *and* the screen under it away, leaving the app with no focus.
 class ChooserPage : public brls::List
 {
   public:
-    explicit ChooserPage(Gate* gate)
-        : gate(gate)
+    explicit ChooserPage(std::function<void(std::string)> done)
+        : done(std::move(done))
     {
     }
 
+    /// The rows ask this. Only the first call counts.
+    void choose(const std::string& value)
+    {
+        if (this->chosen)
+            return;
+        this->chosen = true;
+        this->value  = value;
+    }
+
+    /// Rows stay inert until the button that opened the page is released.
+    std::shared_ptr<Gate> gate() const { return this->gateState; }
+
     void frame(brls::FrameContext* ctx) override
     {
-        if (++this->frames > 2 && this->gate)
-            this->gate->isOpen = true;
+        if (++this->frames > 2)
+            this->gateState->isOpen = true;
+
+        if (this->chosen && !this->leaving)
+        {
+            this->leaving = true;
+            // The callback outlives this page: popView deletes it.
+            std::function<void(std::string)> callback = this->done;
+            const std::string chosen                  = this->value;
+            brls::Application::popView(brls::ViewAnimation::FADE,
+                [callback, chosen] {
+                    if (callback)
+                        callback(chosen);
+                });
+        }
+
         brls::List::frame(ctx);
     }
 
   private:
-    Gate* gate;
+    std::shared_ptr<Gate> gateState = std::make_shared<Gate>();
+    std::function<void(std::string)> done;
+    std::string value;
+    bool chosen   = false;
+    bool leaving  = false;
     uint64_t frames = 0;
 };
 
-/// A page of rows to pick from, pushed over the screen that asked for it. `gate` is handed to the
-/// rows so they stay inert while the page opens.
-void pushChoices(const std::string& heading, const std::string& note, std::vector<brls::View*> rows,
-    Gate* gate)
+/// A page of rows to pick from, pushed over the screen that asked for it. `fill` adds the rows; they
+/// ask `page->choose(value)`, and `done` is called with the first choice once the page has gone.
+void pushChoices(const std::string& heading, const std::string& note,
+    std::function<void(std::string)> done, std::function<void(ChooserPage*)> fill)
 {
-    ChooserPage* list = new ChooserPage(gate);
-    list->setMargins(24, 24, 24, 24);
+    ChooserPage* page = new ChooserPage(std::move(done));
+    page->setMargins(24, 24, 24, 24);
     if (!heading.empty())
-        list->addView(new brls::Header(heading));
+        page->addView(new brls::Header(heading));
     if (!note.empty())
-        list->addView(ui::text(note, true, 16));
-    for (brls::View* row : rows)
-        list->addView(row);
+        page->addView(ui::text(note, true, 16));
 
-    brls::Application::pushView(list);
-    bindBack(list);
+    fill(page);
+
+    brls::Application::pushView(page);
+    bindBack(page);
 }
 
 /// The page of pictures an instance can wear, `current` marked "in use"; `pick` gets what was chosen.
 void pushPictureChooser(const std::string& current, std::function<void(std::string)> pick)
 {
-    Gate gate;
-    std::vector<brls::View*> rows;
-    for (const Choice& choice : iconChoices())
-    {
-        const std::string value = choice.value;
-        rows.push_back(new Row(choice.picture, choice.label, "", value == current ? "In use" : "",
-            [pick, value] {
-                brls::Application::popView();
-                if (pick)
-                    pick(value);
-            },
-            &gate));
-    }
-
-    pushChoices("Picture", "PNG files in sdmc:/switch/horizon/icons/ are listed too.", rows, &gate);
+    pushChoices("Picture", "PNG files in sdmc:/switch/horizon/icons/ are listed too.", std::move(pick),
+        [current](ChooserPage* page) {
+            for (const Choice& choice : iconChoices())
+            {
+                const std::string value = choice.value;
+                page->addView(new Row(choice.picture, choice.label, "",
+                    value == current ? "In use" : "",
+                    [page, value] { page->choose(value); }, page->gate()));
+            }
+        });
 }
 
 /// The page of instances to play, `current` marked; `pick` gets the instance's id.
 void pushInstanceChooser(const std::string& current, std::function<void(std::string)> pick)
 {
-    Gate gate;
-    std::vector<brls::View*> rows;
-    for (const Instance& candidate : Config::get().instances)
-    {
-        const std::string id = candidate.id;
-        rows.push_back(new Row(ui::iconPath(candidate), candidate.name,
-            ui::playtimeText(candidate.played), candidate.id == current ? "Playing" : "",
-            [pick, id] {
-                brls::Application::popView();
-                if (pick)
-                    pick(id);
-            },
-            &gate));
-    }
-
-    pushChoices("Instance", "Which one Play starts.", rows, &gate);
+    pushChoices("Instance", "Which one Play starts.", std::move(pick),
+        [current](ChooserPage* page) {
+            for (const Instance& candidate : Config::get().instances)
+            {
+                const std::string id = candidate.id;
+                page->addView(new Row(ui::iconPath(candidate), candidate.name,
+                    ui::playtimeText(candidate.played), candidate.id == current ? "Playing" : "",
+                    [page, id] { page->choose(id); }, page->gate()));
+            }
+        });
 }
 
 } // namespace
@@ -396,8 +428,8 @@ void PlayPage::rebuild()
 
     // The arguments every instance gets on top of its own.
     const std::string arguments = trim(config.globalArgs);
-    this->addView(ui::item("Java Arguments",
-        arguments.empty() ? "None. What is typed here is added to the game's own command line."
+    this->addView(ui::item("Global arguments",
+        arguments.empty() ? "None. Whatever goes here is added to every instance's command line."
                           : arguments,
         [this] { this->askArguments(); }));
 }
@@ -532,8 +564,8 @@ void InstancesPage::edit(const std::string& instanceId)
                 [this, id] { this->choosePicture(id); });
             this->addView(picture);
 
-            arguments = new Field("These arguments", instance->args, "This instance's arguments",
-                "Added after the Java Arguments on the Play tab.", 256, {});
+            arguments = new Field("Extra arguments", instance->args, "None",
+                "Added after the global arguments on the Play tab.", 256, {});
             this->addView(arguments);
 
             this->addView(ui::text(ui::playtimeText(instance->played) + " · " +
@@ -587,6 +619,11 @@ void InstancesPage::edit(const std::string& instanceId)
         /// but Exit and the frame counter.
         void leave()
         {
+            // A held button reaches this twice; the second pop would take the page underneath too.
+            if (this->left)
+                return;
+            this->left = true;
+
             brls::Application::popView(brls::ViewAnimation::FADE, [] {
                 refreshPages();
                 if (liveInstances)
@@ -634,6 +671,7 @@ void InstancesPage::edit(const std::string& instanceId)
         }
 
         std::string id;
+        bool left         = false;
         Row* picture      = nullptr;
         Field* name       = nullptr;
         Field* arguments  = nullptr;
@@ -705,7 +743,7 @@ void ModsPage::rebuild()
     this->addView(new brls::Header("Mods"));
     this->addView(ui::text(
         "Horizon NX runs resource packs and data packs. Java mods, modpacks and Iris shaders need "
-        "Horizon's own port or format, so the browser says before installing whether one runs.",
+        "Horizon's own format, so each result says whether it runs before you install it.",
         true, 18));
 
     // The kind.
@@ -719,8 +757,8 @@ void ModsPage::rebuild()
             selected = (unsigned)i;
     }
 
-    auto* picker = new brls::SelectListItem("Kind", labels, selected,
-        "Modrinth, the same source the desktop launcher's browser uses.");
+    auto* picker = new brls::SelectListItem("Browse", labels, selected,
+        "Modrinth, the same source the desktop launcher uses.");
     picker->getValueSelectedEvent()->subscribe([this](int index) {
         if (index < 0)
             return;
@@ -905,7 +943,7 @@ void SettingsPage::rebuild()
     else
     {
         auto* picker = new brls::SelectListItem("Account", names, selected,
-            "The account the game plays as, online and on the skin.");
+            "The account the game plays as.");
         picker->getValueSelectedEvent()->subscribe([this](int index) { this->switchAccount(index); });
         this->addView(picker);
 

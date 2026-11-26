@@ -85,7 +85,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    brls::Logger::setLogLevel(brls::LogLevel::INFO);
+    // HORIZON_DEBUG makes the UI library say where focus goes: a screen that stops answering is a
+    // screen whose focus went somewhere that no longer exists, and that line names it.
+    brls::Logger::setLogLevel(std::getenv("HORIZON_DEBUG") ? brls::LogLevel::DEBUG
+                                                           : brls::LogLevel::INFO);
     brls::i18n::loadTranslations();
     ui::applyTheme(config.theme);
     ui::initStyle();
