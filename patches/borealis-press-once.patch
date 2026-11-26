@@ -1,0 +1,19 @@
+Only a fresh press counts as a press.
+
+A held button repeats every frame. When an action pops a view, the framework hands focus to whatever
+is underneath, and the next repeat then "presses" that by itself: choosing a picture closed the
+chooser and the screen below acted on the same button, which left the launcher a screen too far back
+with no focus.
+
+--- a/library/lib/application.cpp
++++ b/library/lib/application.cpp
+@@ -496,7 +496,10 @@ void Application::onGamepadButtonPressed(char button, bool repeating)
+     Application::repetitionOldFocus = Application::currentFocus;
+ 
+     // Actions
+-    if (Application::handleAction(button))
++    // Only a fresh press counts: a repeat is for scrolling, never a second press.
++    if (!repeating && Application::handleAction(button))
+         return;
+ 
+     // Navigation
