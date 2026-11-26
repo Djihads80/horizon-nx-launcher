@@ -11,3 +11,4 @@
 /build/build_config.hpp
 # The pinned Borealis checkout build.sh makes.
 /.borealis/
+/desktop/scratch/

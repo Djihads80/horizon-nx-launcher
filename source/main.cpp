@@ -8,6 +8,7 @@
 //! Every step below writes a line to `switch/horizon/launcher-log.txt` before it runs: a console has
 //! no terminal, so that file is the only way to know where a start stopped.
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 
 #include <borealis.hpp>
@@ -116,6 +117,14 @@ int main(int argc, char** argv)
     log("launcher: first frame");
     brls::Application::pushView(tabs);
     bindSignIn(tabs);
+
+#ifdef HORIZON_DESKTOP
+    // The desktop build has no controller wired to it: a screen three presses deep is opened at once
+    // so it can be looked at. Nothing on a console reads this.
+    if (const char* screen = std::getenv("HORIZON_SCREEN"))
+        openScreenForTest(screen);
+#endif
+
     log("launcher: running");
 
     while (brls::Application::mainLoop())

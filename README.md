@@ -97,6 +97,22 @@ g++ -std=c++17 -I third_party -I source tests/logic_test.cpp \
     source/config.cpp source/util.cpp source/sha512.cpp -o /tmp/logic_test && /tmp/logic_test
 ```
 
+## On a PC, to look at the UI
+
+The same `source/*.cpp` build for a PC, which is how the screens get checked without copying an NRO to
+the SD card every time. It needs `meson`, `ninja`, `glfw3`, `glm` and curl's headers:
+
+```sh
+./desktop/build-desktop.sh          # builds .borealis and the app into desktop/scratch/
+./desktop/build-desktop.sh run      # builds, runs it, and keeps a screenshot beside it
+```
+
+`desktop/compat/switch.h` stands in for the handful of libnx calls the sources make (`envSetNextLoad`
+prints what it would start), and the card layout the app expects is made under `desktop/scratch/card`
+(`sdmc:/switch/horizon/…`, which is a legal directory name on Linux). `HORIZON_SCREEN=instances|picture`
+opens a chooser straight away, since a PC has no controller wired to the harness, and
+`desktop/x11.py` presses keys and takes pictures of the window.
+
 ## Credits
 
 - [Horizon](https://github.com/KoHaku743/horizon-nx) — the port this launches; its sign-in and

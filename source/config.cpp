@@ -20,14 +20,32 @@ json toJson(const Instance& instance)
         { "args", instance.args }, { "played", instance.played } };
 }
 
+/// A string field, or the default when the file holds something else there.
+std::string stringField(const json& value, const char* key, const std::string& fallback)
+{
+    if (value.contains(key) && value[key].is_string())
+        return value[key].get<std::string>();
+    return fallback;
+}
+
+/// A number, or the default: a hand-edited file can hold "60" where 60 belongs.
+uint64_t numberField(const json& value, const char* key, uint64_t fallback)
+{
+    if (value.contains(key) && value[key].is_number_unsigned())
+        return value[key].get<uint64_t>();
+    if (value.contains(key) && value[key].is_number_integer())
+        return (uint64_t)std::max<int64_t>(0, value[key].get<int64_t>());
+    return fallback;
+}
+
 Instance fromJson(const json& value)
 {
     Instance instance;
-    instance.id     = value.value("id", "");
-    instance.name   = value.value("name", instance.id);
-    instance.icon   = value.value("icon", "");
-    instance.args   = value.value("args", "");
-    instance.played = value.value("played", (uint64_t)0);
+    instance.id     = stringField(value, "id", "");
+    instance.name   = stringField(value, "name", instance.id);
+    instance.icon   = stringField(value, "icon", "");
+    instance.args   = stringField(value, "args", "");
+    instance.played = numberField(value, "played", 0);
     return instance;
 }
 
@@ -50,14 +68,19 @@ void Config::load()
         json value = json::parse(text, nullptr, false);
         if (!value.is_discarded() && value.is_object())
         {
-            theme      = value.value("theme", theme);
-            globalArgs = value.value("globalArgs", globalArgs);
-            showFps    = value.value("showFps", showFps);
-            clientId   = value.value("clientId", clientId);
-            selected   = value.value("selected", selected);
-            account    = value.value("account", account);
-            session      = value.value("session", "");
-            sessionStart = value.value("sessionStart", (uint64_t)0);
+            // Every field is read for the type it should be: value() throws on a wrong type, and a
+            // settings file edited by hand is the one place a wrong type turns up. Skipping the line
+            // costs a default; throwing ends the app on its first screen.
+            theme      = stringField(value, "theme", theme);
+            globalArgs = stringField(value, "globalArgs", globalArgs);
+            showFps    = value.contains("showFps") && value["showFps"].is_boolean()
+                   ? value["showFps"].get<bool>()
+                   : showFps;
+            clientId   = stringField(value, "clientId", clientId);
+            selected   = stringField(value, "selected", selected);
+            account    = stringField(value, "account", account);
+            session    = stringField(value, "session", "");
+            sessionStart = numberField(value, "sessionStart", 0);
             if (value.contains("instances") && value["instances"].is_array())
                 for (const json& item : value["instances"])
                     if (item.is_object())

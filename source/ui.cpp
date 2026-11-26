@@ -106,9 +106,15 @@ std::string accountSubtitle()
 
 void initStyle()
 {
+    brls::Style* style = brls::Application::getStyle();
+
     // A row's picture is as tall as the row minus this padding on both sides. The library's default
     // (11) makes it tall enough to spill over the row's rounded highlight; 24 keeps it inside.
-    brls::Application::getStyle()->List.Item.thumbnailPadding = 24;
+    style->List.Item.thumbnailPadding = 24;
+
+    // The library leaves 61 pixels between list rows, which reads as a list with gaps in it. Rows of
+    // their own (the pickers, the instances) are drawn edge to edge, so they sit closer.
+    style->List.spacing = 12;
 }
 
 std::string playtimeText(uint64_t seconds)

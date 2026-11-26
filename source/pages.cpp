@@ -79,8 +79,25 @@ int picture(NVGcontext* vg, const std::string& file)
 
     const int image = nvgCreateImage(vg, file.c_str(), NVG_IMAGE_NEAREST);
     cache[file]     = image;
+    // A console has no terminal: a picture that will not load says so here instead of appearing as
+    // an empty tile with nothing to go on.
+    if (image == 0)
+        log("picture: %s did not load", file.c_str());
     return image;
 }
+
+/// The rows of a chooser ignore the button that opened the page for the first frames. The press is
+/// still down when the page appears, and acting on it makes a chooser pick its first row and close in
+/// the same frame it opened — which is exactly what the picture picker did.
+class Gate
+{
+  public:
+    bool open() const { return this->isOpen; }
+
+  private:
+    friend class ChooserPage;
+    bool isOpen = false;
+};
 
 /// A row with a picture: its name, a line under it, and what it is (in use, change). Drawn here
 /// rather than as a list item because a list item sizes its picture from the row height (so it sits
@@ -89,15 +106,18 @@ class Row : public brls::View
 {
   public:
     Row(std::string file, std::string title, std::string detail, std::string value,
-        std::function<void()> onClick)
-        : iconFile(std::move(file))
+        std::function<void()> onClick, Gate* gate = nullptr)
+        : gate(gate)
+        , iconFile(std::move(file))
         , title(std::move(title))
         , detail(std::move(detail))
         , value(std::move(value))
         , onClick(std::move(onClick))
     {
-        this->setHeight(this->detail.empty() ? 76 : 96);
+        this->setHeight(this->detail.empty() ? 56 : 96);
         this->registerAction("OK", brls::Key::A, [this] {
+            if (this->gate && !this->gate->open())
+                return true; // the press that opened the page is still down
             if (this->onClick)
                 this->onClick();
             return true;
@@ -113,14 +133,15 @@ class Row : public brls::View
         this->title    = std::move(title);
         this->detail   = std::move(detail);
         this->value    = std::move(value);
-        this->setHeight(this->detail.empty() ? 76 : 96);
+        this->setHeight(this->detail.empty() ? 56 : 96);
         this->invalidate();
     }
 
     void draw(NVGcontext* vg, int x, int y, unsigned width, unsigned height, brls::Style* style,
         brls::FrameContext* ctx) override
     {
-        const int iconSize = 56;
+        // A row with one line of text needs less room: 56 with the picture inside it.
+        const int iconSize = this->detail.empty() ? 40 : 56;
         const int iconX    = x + 16;
         // Exactly centred in the row, whatever the row's height is.
         const int iconY = y + ((int)height - iconSize) / 2;
@@ -163,6 +184,7 @@ class Row : public brls::View
     }
 
   private:
+    Gate* gate = nullptr;
     std::string iconFile, title, detail, value;
     std::function<void()> onClick;
 };
@@ -217,10 +239,34 @@ std::string pictureLabel(const Instance& instance)
     return slash == std::string::npos ? instance.icon : instance.icon.substr(slash + 1);
 }
 
-/// A page of rows to pick from, pushed over the screen that asked for it.
-void pushChoices(const std::string& heading, const std::string& note, std::vector<brls::View*> rows)
+/// A list of rows to choose from: it opens its gate after a couple of frames, and closes itself when
+/// the page is asked to.
+class ChooserPage : public brls::List
 {
-    brls::List* list = new brls::List();
+  public:
+    explicit ChooserPage(Gate* gate)
+        : gate(gate)
+    {
+    }
+
+    void frame(brls::FrameContext* ctx) override
+    {
+        if (++this->frames > 2 && this->gate)
+            this->gate->isOpen = true;
+        brls::List::frame(ctx);
+    }
+
+  private:
+    Gate* gate;
+    uint64_t frames = 0;
+};
+
+/// A page of rows to pick from, pushed over the screen that asked for it. `gate` is handed to the
+/// rows so they stay inert while the page opens.
+void pushChoices(const std::string& heading, const std::string& note, std::vector<brls::View*> rows,
+    Gate* gate)
+{
+    ChooserPage* list = new ChooserPage(gate);
     list->setMargins(24, 24, 24, 24);
     if (!heading.empty())
         list->addView(new brls::Header(heading));
@@ -233,7 +279,46 @@ void pushChoices(const std::string& heading, const std::string& note, std::vecto
     bindBack(list);
 }
 
+/// The page of pictures an instance can wear, `current` marked "in use"; `pick` gets what was chosen.
+void pushPictureChooser(const std::string& current, std::function<void(std::string)> pick)
+{
+    Gate gate;
+    std::vector<brls::View*> rows;
+    for (const Choice& choice : iconChoices())
+    {
+        const std::string value = choice.value;
+        rows.push_back(new Row(choice.picture, choice.label, "", value == current ? "In use" : "",
+            [pick, value] {
+                brls::Application::popView();
+                if (pick)
+                    pick(value);
+            },
+            &gate));
+    }
 
+    pushChoices("Picture", "PNG files in sdmc:/switch/horizon/icons/ are listed too.", rows, &gate);
+}
+
+/// The page of instances to play, `current` marked; `pick` gets the instance's id.
+void pushInstanceChooser(const std::string& current, std::function<void(std::string)> pick)
+{
+    Gate gate;
+    std::vector<brls::View*> rows;
+    for (const Instance& candidate : Config::get().instances)
+    {
+        const std::string id = candidate.id;
+        rows.push_back(new Row(ui::iconPath(candidate), candidate.name,
+            ui::playtimeText(candidate.played), candidate.id == current ? "Playing" : "",
+            [pick, id] {
+                brls::Application::popView();
+                if (pick)
+                    pick(id);
+            },
+            &gate));
+    }
+
+    pushChoices("Instance", "Which one Play starts.", rows, &gate);
+}
 
 } // namespace
 
@@ -292,21 +377,12 @@ void PlayPage::rebuild()
     brls::View* picker = new Row(ui::iconPath(*instance), instance->name,
         ui::playtimeText(instance->played), config.instances.size() > 1 ? "Change" : "",
         [this, id] {
-            std::vector<brls::View*> rows;
-            for (const Instance& candidate : Config::get().instances)
-            {
-                const std::string candidateId = candidate.id;
-                rows.push_back(new Row(ui::iconPath(candidate), candidate.name,
-                    ui::playtimeText(candidate.played), candidate.id == id ? "Playing" : "",
-                    [this, candidateId] {
-                        auto& config = Config::get();
-                        config.selected = candidateId;
-                        config.save();
-                        brls::Application::popView();
-                        this->rebuild();
-                    }));
-            }
-            pushChoices("Instance", "Which one Play starts.", rows);
+            pushInstanceChooser(id, [this](std::string chosen) {
+                auto& config    = Config::get();
+                config.selected = chosen;
+                config.save();
+                this->rebuild();
+            });
         });
     this->addView(picker);
 
@@ -467,26 +543,31 @@ void InstancesPage::edit(const std::string& instanceId)
             if (instance->id != config.selected)
                 this->addView(ui::item("Use this instance", "Play starts it from now on.",
                     [this, id] {
-                        this->save(id);
+                        this->apply(id);
                         Config::get().selected = id;
                         Config::get().save();
                         brls::Application::notify("That is the instance Play starts");
-                        brls::Application::popView();
-                        refreshPages();
+                        this->leave();
                     }));
 
-            this->addView(ui::item("Done", "Keep these settings.", [this, id] { this->save(id); }));
+            this->addView(ui::item("Done", "Keep these settings.", [this, id] {
+                this->apply(id);
+                brls::Application::notify("Saved");
+                this->leave();
+            }));
 
             if (config.instances.size() > 1)
                 this->addView(ui::item("Delete this instance",
                     "Removes its worlds, packs and mods too.", [this, id] {
-                        brls::Application::popView();
-                        if (InstancesPage* page = live())
-                            page->remove(id);
+                        brls::Application::popView(brls::ViewAnimation::FADE, [id] {
+                            if (InstancesPage* page = live())
+                                page->remove(id);
+                        });
                     }));
         }
 
-        void save(const std::string& instanceId)
+        /// Writes what the fields hold, without leaving this screen.
+        void apply(const std::string& instanceId)
         {
             auto& config = Config::get();
             Instance* instance = config.find(instanceId);
@@ -499,9 +580,18 @@ void InstancesPage::edit(const std::string& instanceId)
                 instance->args = trim(arguments->getValue());
 
             config.save();
-            brls::Application::notify("Saved");
-            brls::Application::popView();
-            refreshPages();
+        }
+
+        /// Leaves this screen and refreshes the pages behind it, once the pop has finished: rebuilding
+        /// them while their focused row is being handed back leaves the console with nothing listening
+        /// but Exit and the frame counter.
+        void leave()
+        {
+            brls::Application::popView(brls::ViewAnimation::FADE, [] {
+                refreshPages();
+                if (liveInstances)
+                    liveInstances->focusFirst();
+            });
         }
 
         /// The pictures on offer, each drawn, so the choice is made by looking at it. Picking one
@@ -513,16 +603,9 @@ void InstancesPage::edit(const std::string& instanceId)
                 return;
             const std::string current = instance->icon;
 
-            std::vector<brls::View*> rows;
-            for (const Choice& choice : iconChoices())
-            {
-                const std::string value = choice.value;
-                rows.push_back(new Row(choice.picture, choice.label, "",
-                    value == current ? "In use" : "",
-                    [this, instanceId, value] { this->usePicture(instanceId, value); }));
-            }
-
-            pushChoices("Picture", "PNG files in sdmc:/switch/horizon/icons/ are listed too.", rows);
+            pushPictureChooser(current, [this, instanceId](std::string value) {
+                this->usePicture(instanceId, value);
+            });
         }
 
         void usePicture(const std::string& instanceId, const std::string& value)
@@ -563,6 +646,16 @@ void InstancesPage::edit(const std::string& instanceId)
     bindBack(edit);
 }
 
+void InstancesPage::focusFirst()
+{
+    for (size_t i = 0; i < this->getViewsCount(); i++)
+        if (brls::View* focus = this->getChild(i)->getDefaultFocus())
+        {
+            brls::Application::giveFocus(focus);
+            return;
+        }
+}
+
 void InstancesPage::remove(const std::string& instanceId)
 {
     auto& config = Config::get();
@@ -581,6 +674,7 @@ void InstancesPage::remove(const std::string& instanceId)
                     {
                         this->rebuild();
                         refreshPages();
+                        this->focusFirst();
                         brls::Application::notify("Deleted");
                     }
                     else
@@ -1112,5 +1206,24 @@ void pushSignIn()
     });
     bindBack(page);
 }
+
+#ifdef HORIZON_DESKTOP
+/// Opens a screen by name, for the desktop build: a PC has no controller wired to the harness, so a
+/// page three presses deep is opened at once with HORIZON_SCREEN=instances|picture.
+void openScreenForTest(const std::string& name)
+{
+    auto& config = Config::get();
+    const Instance* instance = config.find(config.selected);
+    const std::string icon   = instance ? instance->icon : "";
+
+    if (name == "picture")
+        pushPictureChooser(icon, [](std::string value) { log("test: picture %s", value.c_str()); });
+    else if (name == "instances")
+        pushInstanceChooser(config.selected,
+            [](std::string id) { log("test: instance %s", id.c_str()); });
+    else
+        log("test: no screen called %s", name.c_str());
+}
+#endif
 
 } // namespace launcher

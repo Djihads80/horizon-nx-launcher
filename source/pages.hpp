@@ -48,6 +48,8 @@ class InstancesPage : public brls::List
     InstancesPage();
     ~InstancesPage() override;
     void rebuild();
+    /// Focus the first row: after rebuild() the rows are new objects.
+    void focusFirst();
 
   private:
     void create();
@@ -131,5 +133,11 @@ void bindSignIn(brls::View* view);
 /// Gives a pushed screen a way back: B pops it. The library's own Back comes from AppletFrame, which
 /// the tabs are and a pushed list is not — without this, a pushed screen can only sign in or exit.
 void bindBack(brls::View* view);
+
+#ifdef HORIZON_DESKTOP
+/// Opens a page by name (instances|picture): a development aid for the desktop build, where no
+/// controller drives the UI.
+void openScreenForTest(const std::string& name);
+#endif
 
 } // namespace launcher
