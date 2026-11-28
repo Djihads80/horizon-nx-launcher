@@ -130,8 +130,16 @@ void Config::load()
     refreshAccounts();
     endSession();
 
-    if (changed)
-        save();
+    // What was read back, in one line: an instance whose picture did not survive a restart shows up
+    // here as a name with no picture behind it.
+    size_t painted = 0;
+    for (const Instance& instance : instances)
+        if (!instance.icon.empty())
+            ++painted;
+    log("config: %zu instance(s), %zu with a picture", instances.size(), painted);
+
+    if (changed && !save())
+        log("config: launcher.json could not be written");
 }
 
 void Config::beginSession(const std::string& instanceId)

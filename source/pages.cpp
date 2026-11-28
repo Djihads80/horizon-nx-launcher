@@ -713,14 +713,15 @@ void InstancesPage::edit(const std::string& instanceId)
                 return;
 
             instance->icon = value;
-            config.save();
+            if (!config.save())
+                log("picture: %s could not be saved", instanceId.c_str());
+            log("picture: %s now wears \"%s\"", instanceId.c_str(), value.c_str());
 
-            // The row this page was opened from, updated in place: the screen underneath stays as it
-            // was, with the new picture on it.
+            // The chooser has already popped itself: this only has to bring the row and the pages up
+            // to date. Popping here took the editor away as well.
             if (this->picture)
                 this->picture->set(ui::iconPath(*instance), pictureLabel(*instance), "", "Choose");
 
-            brls::Application::popView();
             refreshPages();
         }
 
