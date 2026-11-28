@@ -12,6 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROMFS = os.path.join(HERE, "romfs", "img")
+# The launcher's own mark, drawn by its author: scaled to the size the app and the HOME menu need.
+ART = os.path.join(HERE, "art", "icon.png")
 
 SIZE = 256
 
@@ -31,7 +33,17 @@ def save(image, *parts):
 
 
 def launcher():
-    """A dark tile with a horizon line and a rising sun: the launcher's own mark."""
+    """The launcher's mark: art/icon.png when it is there, else the horizon drawn below."""
+    if os.path.isfile(ART):
+        source = Image.open(ART).convert("RGBA")
+        # Square by construction, but a design that is not is cropped to its middle rather than
+        # squashed.
+        side = min(source.size)
+        left = (source.width - side) // 2
+        top = (source.height - side) // 2
+        return source.crop((left, top, left + side, top + side)).resize((SIZE, SIZE), Image.LANCZOS)
+
+    """A dark tile with a horizon line and a rising sun."""
     image = rounded((32, 40, 52))
     draw = ImageDraw.Draw(image)
     for y in range(120, 200):                       # sky, top to bottom
