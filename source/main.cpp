@@ -61,8 +61,11 @@ int main(int argc, char** argv)
     // Applet mode (started from the Album) has a fraction of an application's memory: the game
     // can't be started from it, and the UI library may not get its framebuffers. Say so in the log
     // and stop, rather than fault part-way through drawing the first frame.
-    const AppletType type = appletGetAppletType();
-    if (type != AppletType_Application && type != AppletType_SystemApplication)
+    // An emulator reports the launcher as a library applet even though it has an application's
+    // memory, so the refusal can be lifted for it: HORIZON_ALLOW_APPLET=1.
+    const bool forcedApplet = std::getenv("HORIZON_ALLOW_APPLET") != nullptr;
+    const AppletType type    = appletGetAppletType();
+    if (type != AppletType_Application && type != AppletType_SystemApplication && !forcedApplet)
     {
         log("launcher: started as an applet (%d). Hold R while starting any game to open the "
             "homebrew menu as an application, then choose Horizon Launcher: applet mode has too "

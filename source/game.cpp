@@ -38,7 +38,15 @@ bool latestGameRelease(GameRelease& release, std::string& error)
     }
     if (answer.status != 200)
     {
-        error = "GitHub answered " + std::to_string(answer.status) + " for the latest release.";
+        // GitHub answers 403 with a sentence in the body when it is rate-limiting the address, which
+        // is the one refusal a player can do nothing about but wait out: say so, not "403".
+        json why = json::parse(answer.body, nullptr, false);
+        const std::string message = why.is_object() ? why.value("message", "") : "";
+        if (answer.status == 403 || answer.status == 429)
+            error = "GitHub is refusing requests from this connection right now" +
+                (message.empty() ? "." : " (" + message + ").") + " Try again later.";
+        else
+            error = "GitHub answered " + std::to_string(answer.status) + " for the latest release.";
         return false;
     }
 
