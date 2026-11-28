@@ -137,6 +137,8 @@ void Config::load()
         if (!instance.icon.empty())
             ++painted;
     log("config: %zu instance(s), %zu with a picture", instances.size(), painted);
+    for (const Instance& instance : instances)
+        log("config: %s wears \"%s\"", instance.id.c_str(), instance.icon.c_str());
 
     if (changed && !save())
         log("config: launcher.json could not be written");
@@ -171,6 +173,23 @@ void Config::endSession()
     session.clear();
     sessionStart = 0;
     save();
+}
+
+std::string Config::storedPicture(const std::string& instanceId) const
+{
+    std::string text;
+    if (!readFile(configPath(), text))
+        return "<no file>";
+
+    json value = json::parse(text, nullptr, false);
+    if (value.is_discarded() || !value.is_object() || !value.contains("instances"))
+        return "<unreadable>";
+
+    for (const json& item : value["instances"])
+        if (item.is_object() && item.value("id", "") == instanceId)
+            return item.contains("icon") && item["icon"].is_string() ? item["icon"].get<std::string>()
+                                                                    : "<no icon field>";
+    return "<no such instance>";
 }
 
 bool Config::save()

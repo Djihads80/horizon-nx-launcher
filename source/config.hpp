@@ -78,6 +78,11 @@ class Config
 
     std::string accountFile(const std::string& uuid) const;
 
+    /// What the settings file on the SD card holds for an instance's picture, read back after a save:
+    /// a picture that is set, shown and gone after a restart is either not written or not read, and
+    /// this says which. "<no file>" and "<unreadable>" are answers too.
+    std::string storedPicture(const std::string& instanceId) const;
+
     /// The game is about to start: remembers which instance and when, so the time it is played for
     /// can be counted when the launcher next runs (nothing else survives the hand-over).
     void beginSession(const std::string& instanceId);

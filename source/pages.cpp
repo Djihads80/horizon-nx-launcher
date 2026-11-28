@@ -716,6 +716,7 @@ void InstancesPage::edit(const std::string& instanceId)
             if (!config.save())
                 log("picture: %s could not be saved", instanceId.c_str());
             log("picture: %s now wears \"%s\"", instanceId.c_str(), value.c_str());
+            log("picture: the file holds \"%s\"", config.storedPicture(instanceId).c_str());
 
             // The chooser has already popped itself: this only has to bring the row and the pages up
             // to date. Popping here took the editor away as well.
