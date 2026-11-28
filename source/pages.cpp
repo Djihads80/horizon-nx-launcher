@@ -198,7 +198,9 @@ class Row : public brls::View
         const int image = picture(vg, this->iconFile);
         nvgBeginPath(vg);
         nvgRect(vg, (float)iconX, (float)iconY, (float)iconSize, (float)iconSize);
-        if (image != 0)
+        if (this->iconFile.empty())
+            nvgFillColor(vg, nvgRGBA(0, 0, 0, 0));
+        else if (image != 0)
             nvgFillPaint(vg,
                 nvgImagePattern(vg, (float)iconX, (float)iconY, (float)iconSize, (float)iconSize,
                     0.0f, image, 1.0f));
@@ -386,6 +388,27 @@ void pushChoices(const std::string& heading, const std::string& note,
     bindBack(page);
 }
 
+/// A page of plain choices — a kind to browse, a world, an account, a theme. It is the same page the
+/// picture picker uses, so every list behaves alike and none of them is the framework's dropdown,
+/// whose callback can outlive what it points at (that was the Mods kind switch crashing the app).
+void pushTextChooser(const std::string& heading, const std::string& note,
+    const std::vector<std::string>& items, unsigned current, std::function<void(unsigned)> pick)
+{
+    pushChoices(heading, note,
+        [pick](std::string value) {
+            if (pick)
+                pick((unsigned)std::stoul(value));
+        },
+        [items, current](ChooserPage* page) {
+            for (size_t i = 0; i < items.size(); i++)
+            {
+                const std::string index = std::to_string(i);
+                page->addView(new Row("", items[i], "", i == current ? "Selected" : "",
+                    [page, index] { page->choose(index); }, page->gate()));
+            }
+        });
+}
+
 /// The page of pictures an instance can wear, `current` marked "in use"; `pick` gets what was chosen.
 void pushPictureChooser(const std::string& current, std::function<void(std::string)> pick)
 {
@@ -508,7 +531,9 @@ void PlayPage::rebuild()
     play->setLabel("Play");
     // A button in a list keeps no height of its own: without this it is a line.
     play->setHeight(96);
-    play->getClickEvent()->subscribe([this, id](brls::View*) { this->play(id); });
+    // Which instance, read when the button is pressed: switching instance refreshes this page in
+    // place, and a captured id would start the one that was selected before the switch.
+    play->getClickEvent()->subscribe([this](brls::View*) { this->play(Config::get().selected); });
     this->addView(play);
     this->playButton = play;
 
@@ -911,17 +936,18 @@ void ModsPage::rebuild()
             selected = (unsigned)i;
     }
 
-    auto* picker = new brls::SelectListItem("Browse", labels, selected,
-        "Modrinth, the same source the desktop launcher uses.");
-    picker->getValueSelectedEvent()->subscribe([this](int index) {
-        if (index < 0)
-            return;
-        this->kind = allKinds()[(size_t)index];
-        this->results.clear();
-        this->status = "Pick a kind, then Search.";
-        this->rebuild();
-    });
-    this->addView(picker);
+    this->addView(ui::item("Browse", std::string(kindLabel(kind)) +
+                                         " — from Modrinth, the source the desktop launcher uses.",
+        [this, labels, selected] {
+            pushTextChooser("Browse", "What to look for on Modrinth.", labels, selected,
+                [this](unsigned index) {
+                    this->kind = allKinds()[index];
+                    this->results.clear();
+                    this->status = "Pick a kind, then Search.";
+                    this->rebuild();
+                });
+        },
+        "Change"));
 
     // Data packs go into one of the instance's worlds.
     if (instance && kind == Kind::DataPack)
@@ -939,13 +965,15 @@ void ModsPage::rebuild()
                 if (names[i] == world)
                     at = (unsigned)i;
 
-            auto* pick = new brls::SelectListItem("World", names, at,
-                "The data pack is installed into this world.");
-            pick->getValueSelectedEvent()->subscribe([this, names](int index) {
-                if (index >= 0 && index < (int)names.size())
-                    this->world = names[(size_t)index];
-            });
-            this->addView(pick);
+            this->addView(ui::item("World", "The data pack goes into " + world + ".",
+                [this, names, at] {
+                    pushTextChooser("World", "Which world the data pack goes into.", names, at,
+                        [this, names](unsigned index) {
+                            this->world = names[index];
+                            this->rebuild();
+                        });
+                },
+                "Change"));
         }
     }
 
@@ -1096,10 +1124,14 @@ void SettingsPage::rebuild()
     }
     else
     {
-        auto* picker = new brls::SelectListItem("Account", names, selected,
-            "The account the game plays as.");
-        picker->getValueSelectedEvent()->subscribe([this](int index) { this->switchAccount(index); });
-        this->addView(picker);
+        const unsigned current = selected;
+        this->addView(ui::item("Account",
+            "The game plays as " + names[selected] + ".",
+            [this, names, current] {
+                pushTextChooser("Account", "Which account the game plays as.", names, current,
+                    [this](unsigned index) { this->switchAccount((int)index); });
+            },
+            "Change"));
 
         this->addView(ui::item("Sign in another account",
             "Press Minus at any time to come straight here.",
@@ -1113,15 +1145,18 @@ void SettingsPage::rebuild()
     this->addView(new brls::Header("Appearance"));
     std::vector<std::string> themes = { "System", "Dark", "Light" };
     unsigned theme = config.theme == "dark" ? 1 : (config.theme == "light" ? 2 : 0);
-    auto* themeItem = new brls::SelectListItem("Theme", themes, theme,
-        "System follows the console's own light or dark setting.");
-    themeItem->getValueSelectedEvent()->subscribe([](int index) {
-        auto& config = Config::get();
-        config.theme = index == 1 ? "dark" : (index == 2 ? "light" : "system");
-        config.save();
-        ui::applyTheme(config.theme);
-    });
-    this->addView(themeItem);
+    this->addView(ui::item("Theme", "System follows the console's own light or dark setting.",
+        [this, themes, theme] {
+            pushTextChooser("Theme", "System follows the console's own light or dark setting.", themes,
+                theme, [this](unsigned index) {
+                    auto& config = Config::get();
+                    config.theme = index == 1 ? "dark" : (index == 2 ? "light" : "system");
+                    config.save();
+                    ui::applyTheme(config.theme);
+                    this->rebuild();
+                });
+        },
+        themes[theme]));
 
     // The game: installed here, or fetched from its release.
     this->addView(new brls::Header("Game"));
