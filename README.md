@@ -32,12 +32,10 @@ instead of running out of memory halfway.
 
 ## Installing
 
-Copy these to the SD card:
-
-```
-switch/horizon/launcher.nro      this launcher
-switch/horizon/horizon.nro       the game it starts
-```
+Copy `switch/horizon/launcher.nro` to the SD card and start it. That is the whole install: the game is
+not shipped with the launcher, and **Play downloads it** — the latest release's `horizon.nro` (about
+90 MB), checked against the `horizon.nro.sha256` the release publishes, then started. Settings → Game
+does the same from a menu, and reinstalls over an older game.
 
 The launcher's own settings file (`launcher.json`) appears the first time it saves something.
 

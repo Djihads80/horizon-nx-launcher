@@ -126,6 +126,11 @@ int main(int argc, char** argv)
     // so it can be looked at. Nothing on a console reads this.
     if (const char* screen = std::getenv("HORIZON_SCREEN"))
         openScreenForTest(screen);
+
+    if (std::getenv("HORIZON_INSTALL"))
+        installGameForTest([](bool ok, std::string error) {
+            log("test: install %s", ok ? "ok" : error.c_str());
+        });
 #endif
 
     log("launcher: running");

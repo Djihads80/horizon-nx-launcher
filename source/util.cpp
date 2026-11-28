@@ -303,7 +303,79 @@ size_t onDownload(char* data, size_t size, size_t count, void* userdata)
     return ::fwrite(data, size, count, f) * size;
 }
 
+/// Called by curl as the body arrives: the callback and the counters behind it.
+struct ProgressHook
+{
+    const std::function<void(double)>* progress = nullptr;
+};
+
+int onProgress(void* userdata, curl_off_t totalDownload, curl_off_t done, curl_off_t, curl_off_t)
+{
+    ProgressHook* hook = (ProgressHook*)userdata;
+    if (hook->progress && *hook->progress)
+        (*hook->progress)(totalDownload > 0 ? (double)done / (double)totalDownload : 0.0);
+    return 0;
+}
+
 } // namespace
+
+bool downloadFile(const std::string& url, const std::string& path,
+    const std::function<void(double)>& progress, std::string& error)
+{
+    FILE* file = ::fopen(path.c_str(), "wb");
+    if (!file)
+    {
+        error = "Could not write to " + path + ".";
+        return false;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl)
+    {
+        ::fclose(file);
+        error = "Could not start the network.";
+        return false;
+    }
+
+    ProgressHook hook { &progress };
+
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, onDownload);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
+    setup(curl, url);
+    // A game is around a hundred megabytes over a console's wifi: no overall deadline, but a stalled
+    // connection still gives up.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, onProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &hook);
+
+    const CURLcode code = curl_easy_perform(curl);
+
+    long status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_cleanup(curl);
+
+    const bool closed = ::fclose(file) == 0;
+
+    if (code != CURLE_OK)
+    {
+        error = std::string("The download stopped: ") + curl_easy_strerror(code);
+        return false;
+    }
+    if (status != 200 && status != 206)
+    {
+        error = "The server answered " + std::to_string(status) + " for the download.";
+        return false;
+    }
+    if (!closed)
+    {
+        error = "The file could not be finished writing.";
+        return false;
+    }
+    return true;
+}
 
 HttpResult httpRequest(const std::string& method, const std::string& url, const Fields& form,
     const std::string& json, const std::vector<std::string>& headers)

@@ -76,6 +76,11 @@ using Fields = std::vector<std::pair<std::string, std::string>>;
 
 /// One request. `form` is sent as `application/x-www-form-urlencoded`, `json` as JSON (leave one
 /// empty). Blocking: call it from the worker.
+/// Streams a URL straight into a file, reporting 0..1 as the bytes arrive. Runs on the calling
+/// thread: call it from the worker. True when the whole body arrived and the file closed cleanly.
+bool downloadFile(const std::string& url, const std::string& path,
+    const std::function<void(double)>& progress, std::string& error);
+
 HttpResult httpRequest(const std::string& method, const std::string& url,
     const Fields& form = {}, const std::string& json = "",
     const std::vector<std::string>& headers = {});

@@ -37,9 +37,18 @@ class PlayPage : public brls::List
     /// and a page whose focused row has been deleted answers nothing.
     void refresh();
 
+    /// The download runs on the worker; this is called every frame, so the Play button can say how
+    /// far it has got without the page being rebuilt under the progress.
+    void frame(brls::FrameContext* ctx) override;
+
   private:
     void play(const std::string& instanceId);
-    brls::View* pickerRow = nullptr;
+    /// Fetches the game, then plays it: what Play does when there is no horizon.nro yet.
+    void install(const std::string& instanceId);
+    brls::View* pickerRow    = nullptr;
+    brls::Button* playButton = nullptr;
+    /// Whether the Play button is currently showing the download's progress instead of its name.
+    bool buttonIsProgress = false;
     void askArguments();
 
     AlivePtr alive = std::make_shared<Alive>();
@@ -146,6 +155,9 @@ void bindBack(brls::View* view);
 /// Opens a page by name (instances|picture): a development aid for the desktop build, where no
 /// controller drives the UI.
 void openScreenForTest(const std::string& name);
+
+/// Runs the game download Play runs, for the same reason: HORIZON_INSTALL=1.
+void installGameForTest(std::function<void(bool, std::string)> done);
 #endif
 
 } // namespace launcher

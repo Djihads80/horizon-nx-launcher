@@ -1,10 +1,12 @@
 #include "pages.hpp"
 
 #include "config.hpp"
+#include "game.hpp"
 #include "ui.hpp"
 #include "util.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <map>
 #include <memory>
@@ -56,6 +58,45 @@ class Field : public brls::InputListItem
   private:
     std::function<void(std::string)> changed;
 };
+
+/// What the game download is doing. The transfer runs on the worker, so these are the only things it
+/// touches: a percentage and whether it is still going. The page reads them while it draws.
+std::atomic<bool> installing { false };
+std::atomic<int> installPercent { 0 };
+std::string installError;
+
+/// Downloads the game and puts it in place. `done` runs on the UI thread with what happened.
+void installTheGame(std::function<void(bool, std::string)> done)
+{
+    if (installing.exchange(true))
+        return;
+
+    installPercent = 0;
+    installError.clear();
+
+    Worker::get().post(
+        [] {
+            GameRelease release;
+            std::string error;
+            bool ok = latestGameRelease(release, error);
+            if (ok)
+            {
+                const uint64_t expected = release.bytes;
+                ok = installGame(release, [expected](double part) {
+                    installPercent = (int)(part * 100.0);
+                    (void)expected;
+                }, error);
+            }
+            installError = error;
+            installing   = false;
+        },
+        [done] {
+            const bool ok = installError.empty();
+            const std::string error = installError;
+            if (done)
+                done(ok, error);
+        });
+}
 
 /// Pictures by path, each loaded once. A path that fails is remembered as failed too: retrying a
 /// missing or broken file in draw() on every frame is a freeze, which is exactly what a bad icon used
@@ -429,7 +470,9 @@ void PlayPage::refresh()
 void PlayPage::rebuild()
 {
     log("page: play");
-    this->pickerRow = nullptr;
+    this->pickerRow        = nullptr;
+    this->playButton       = nullptr;
+    this->buttonIsProgress = false;
     this->clear();
 
     auto& config = Config::get();
@@ -467,6 +510,7 @@ void PlayPage::rebuild()
     play->setHeight(96);
     play->getClickEvent()->subscribe([this, id](brls::View*) { this->play(id); });
     this->addView(play);
+    this->playButton = play;
 
     // The arguments every instance gets on top of its own.
     const std::string arguments = trim(config.globalArgs);
@@ -476,12 +520,60 @@ void PlayPage::rebuild()
         [this] { this->askArguments(); }));
 }
 
+void PlayPage::install(const std::string& instanceId)
+{
+    brls::Application::notify("Fetching the latest release…");
+
+    installTheGame([this, instanceId](bool ok, std::string error) {
+        if (!ok)
+        {
+            ui::alert("The game could not be installed: " + error);
+            return;
+        }
+
+        brls::Application::notify("The game is installed");
+        this->play(instanceId);
+    });
+}
+
+void PlayPage::frame(brls::FrameContext* ctx)
+{
+    // While a download runs the Play button says how far it has got: the page is not rebuilt under it.
+    if (this->playButton)
+    {
+        if (installing)
+        {
+            this->playButton->setLabel(
+                "Downloading… " + std::to_string(installPercent.load()) + "%");
+            this->buttonIsProgress = true;
+        }
+        else if (this->buttonIsProgress)
+        {
+            this->playButton->setLabel("Play");
+            this->buttonIsProgress = false;
+        }
+    }
+
+    brls::List::frame(ctx);
+}
+
 void PlayPage::play(const std::string& instanceId)
 {
     auto& config = Config::get();
     Instance* instance = config.find(instanceId);
     if (!instance)
         return;
+
+    // Nothing to start yet: the launcher is the installer too, so Play offers to fetch the game
+    // rather than sending the player off to find an .nro.
+    if (!gameInstalled())
+    {
+        ui::confirm(
+            "The game isn't on this console yet.\n\nDownload the latest release (about 90 MB) and "
+            "install it now?",
+            [this, instanceId] { this->install(instanceId); }, "Download");
+        return;
+    }
 
     // Written down before the hand-over: the launcher isn't running while the game is, so this is
     // the only way its playtime gets counted.
@@ -1031,6 +1123,20 @@ void SettingsPage::rebuild()
     });
     this->addView(themeItem);
 
+    // The game: installed here, or fetched from its release.
+    this->addView(new brls::Header("Game"));
+    this->addView(ui::item(gameInstalled() ? "The game is installed" : "The game is not installed",
+        gameInstalled() ? "horizon.nro, in " + root() + "."
+                        : "Download the latest release from inside the launcher.",
+        [this] {
+            installTheGame([this](bool ok, std::string error) {
+                brls::Application::notify(ok ? "The game is installed"
+                                             : "Not installed: " + error);
+                this->rebuild();
+            });
+        },
+        gameInstalled() ? "Reinstall" : "Download"));
+
     // What the launcher does.
     this->addView(new brls::Header("Launch"));
     brls::ToggleListItem* fps =
@@ -1308,6 +1414,11 @@ void pushSignIn()
 }
 
 #ifdef HORIZON_DESKTOP
+void installGameForTest(std::function<void(bool, std::string)> done)
+{
+    installTheGame(std::move(done));
+}
+
 /// Opens a screen by name, for the desktop build: a PC has no controller wired to the harness, so a
 /// page three presses deep is opened at once with HORIZON_SCREEN=instances|picture.
 void openScreenForTest(const std::string& name)
