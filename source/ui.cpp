@@ -240,7 +240,8 @@ bool launchGame(const launcher::Instance& instance, std::string& error)
     }
 
     const std::string line = config.commandLine(instance);
-    log("launch: %s", line.c_str());
+    log("launch: path=%s", launcher::gamePath().c_str());
+    log("launch: argv=%s", line.c_str());
 
     if (!envHasNextLoad())
     {

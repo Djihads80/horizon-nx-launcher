@@ -440,9 +440,12 @@ void Config::forgetAccount(const std::string& uuid)
 
 std::string Config::commandLine(const Instance& instance) const
 {
-    // argv[0] is the game itself: the game reads its folder from it.
-    std::string line = "\"" + gamePath() + "\"";
-    line += " --game-dir \"" + gameDirOf(instance.id) + "\"";
+    // The loader splits this on spaces and takes the first word as the program, so it is written the
+    // way the homebrew menu writes it: no quoting. Quotes here reached the game as part of its own
+    // argument — a folder whose name began with a quote character — and the launch ended on the
+    // console's error screen.
+    std::string line = gamePath();
+    line += " --game-dir " + gameDirOf(instance.id);
 
     if (!trim(globalArgs).empty())
         line += " " + trim(globalArgs);

@@ -67,8 +67,9 @@ int main()
     config.find("my-world")->args = "--world Test";
     config.selected   = "my-world";
     std::string line  = config.commandLine(*config.find("my-world"));
-    CHECK(line.find("\"" + gamePath() + "\"") == 0);
-    CHECK(line.find("--game-dir \"" + gameDirOf("my-world") + "\"") != std::string::npos);
+    // No quoting: the loader splits this on spaces and takes the first word as the program.
+    CHECK(line.find(gamePath() + " --game-dir " + gameDirOf("my-world")) == 0);
+    CHECK(line.find('"') == std::string::npos);
     CHECK(line.find("--render-distance 8 --world Test") != std::string::npos);
 
     // Settings survive being written and read again.
