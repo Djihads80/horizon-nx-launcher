@@ -9,9 +9,16 @@
 //! no terminal, so that file is the only way to know where a start stopped.
 #include <cstdio>
 #include <cstdlib>
+#include <unistd.h>
 #include <exception>
 
 #include <borealis.hpp>
+
+#ifdef __SWITCH__
+// libnx opens nvdrv the first time the GPU is used and closes it when the last reference goes. The
+// hand-over needs it closed: its transfer memory locks heap pages the loader wants.
+extern "C" void nvExit(void);
+#endif
 #include <curl/curl.h>
 #include <switch.h>
 #include "config.hpp"
@@ -142,10 +149,21 @@ int main(int argc, char** argv)
         ;
 
     log("launcher: closing");
-    // Everything this app opened, closed: a service left open at exit is what turns "closed" into an
-    // error dialog on the way out.
+
+    // A hand-over is not a shutdown. The homebrew loader reads the next NRO into this process's heap
+    // once it ends, and the kernel refuses that read (2001-0106) while any page of it is still locked
+    // — by a thread's stack or by a service's transfer memory — which lands on the console's error
+    // screen instead of the game. Everything this app holds is released first, and then the process
+    // ends without running its C++ destructors, which would touch all of it again.
+    Worker::get().stop();
     curl_global_cleanup();
     romfsExit();
     socketExit();
-    return 0;
+#ifdef __SWITCH__
+    if (handedOver())
+        nvExit();
+#endif
+
+    ::fflush(stdout);
+    ::_exit(0);
 }

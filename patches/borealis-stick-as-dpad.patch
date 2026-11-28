@@ -1,0 +1,33 @@
+The left stick moves the focus.
+
+The UI navigates in four directions and the console's GLFW port hands the sticks over as raw axes,
+with no gamepad mapping, so borealis' D-pad mapping (which reads keys) never saw them: the stick did
+nothing. Past a dead zone, the left stick is the D-pad too.
+
+--- a/library/lib/application.cpp
++++ b/library/lib/application.cpp
+@@ -377,6 +377,26 @@
+         Application::gamepad.buttons[GLFW_GAMEPAD_BUTTON_LEFT_BUMPER]  = glfwGetKey(window, GLFW_KEY_L);
+         Application::gamepad.buttons[GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER] = glfwGetKey(window, GLFW_KEY_R);
++
++        // A stick is not a D-pad, and this UI navigates in four directions: where the platform hands
++        // the sticks over as raw axes (the console's port does, with no gamepad mapping) the left one
++        // moves the focus too, past a dead zone so a resting stick does not.
++        int axisCount     = 0;
++        const float* axes = glfwGetJoystickAxes(GLFW_JOYSTICK_1, &axisCount);
++        if (axes && axisCount >= 2)
++        {
++            const float deadZone = 0.55f;
++            if (axes[0] < -deadZone)
++                Application::gamepad.buttons[GLFW_GAMEPAD_BUTTON_DPAD_LEFT] = GLFW_PRESS;
++            else if (axes[0] > deadZone)
++                Application::gamepad.buttons[GLFW_GAMEPAD_BUTTON_DPAD_RIGHT] = GLFW_PRESS;
++
++            if (axes[1] < -deadZone)
++                Application::gamepad.buttons[GLFW_GAMEPAD_BUTTON_DPAD_UP] = GLFW_PRESS;
++            else if (axes[1] > deadZone)
++                Application::gamepad.buttons[GLFW_GAMEPAD_BUTTON_DPAD_DOWN] = GLFW_PRESS;
++        }
+     }
+ 
+     // Trigger gamepad events

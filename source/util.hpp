@@ -40,6 +40,10 @@ std::string gameDirOf(const std::string& instanceId);
 /// A file in the app's romfs, e.g. `asset("img/logo.png")`.
 std::string asset(const std::string& rel);
 
+/// Set once the loader has taken the next NRO: the exit below it is a hand-over, not a shutdown.
+bool handedOver();
+void markHandedOver();
+
 // ----- Files and folders ---------------------------------------------------------------------
 
 bool exists(const std::string& p);
@@ -124,6 +128,11 @@ class Worker
 
     void post(std::function<void()> work, std::function<void()> done);
 
+    /// Asks the worker to finish and waits for its thread. The homebrew loader reads the next NRO
+    /// into this process's heap, and a live thread's stack keeps pages of it locked: the hand-over
+    /// ends on the console's error screen without this.
+    void stop();
+
     /// False when the worker thread could not be created: jobs then run inline, which is fine for
     /// a file copy and not for a network wait the UI would freeze on.
     bool hasThread() const;
@@ -133,6 +142,7 @@ class Worker
     void loop();
 
     bool started = false;
+    std::atomic<bool> stopping { false };
 };
 
 } // namespace launcher

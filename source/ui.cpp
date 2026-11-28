@@ -263,6 +263,7 @@ bool launchGame(const launcher::Instance& instance, std::string& error)
     }
 
     // The loader starts the game once this app has ended.
+    launcher::markHandedOver();
     brls::Application::quit();
     return true;
 }

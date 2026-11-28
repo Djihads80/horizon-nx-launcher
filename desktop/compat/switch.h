@@ -84,6 +84,12 @@ static inline Result threadStart(Thread* thread)
     return pthread_create(&thread->thread, nullptr, threadTrampoline, thread) == 0 ? 0 : 1;
 }
 
+static inline Result threadWaitForExit(Thread* thread)
+{
+    pthread_join(thread->thread, nullptr);
+    return 0;
+}
+
 static inline Result threadClose(Thread* thread)
 {
     (void)thread;

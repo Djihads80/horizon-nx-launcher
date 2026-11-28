@@ -53,6 +53,16 @@ std::string gameDirOf(const std::string& instanceId)
     return instancesDir() + "/" + instanceId + "/home";
 }
 
+namespace
+{
+/// Set once the loader has taken the next NRO. Written on the UI thread as it leaves, read by main
+/// while shutting down.
+bool handed = false;
+} // namespace
+
+bool handedOver() { return handed; }
+void markHandedOver() { handed = true; }
+
 std::string asset(const std::string& rel) { return "romfs:/" + rel; }
 
 // ----- Files and folders ---------------------------------------------------------------------
@@ -674,6 +684,17 @@ void Worker::start()
     log("worker: pump started, jobs run %s", createFailed ? "on the UI thread" : "on the worker");
 }
 
+void Worker::stop()
+{
+    if (!this->started)
+        return;
+
+    this->stopping = true;
+    if (R_SUCCEEDED(threadWaitForExit(&workerThread)))
+        threadClose(&workerThread);
+    this->started = false;
+}
+
 void Worker::threadMain(void* arg)
 {
     ((Worker*)arg)->loop();
@@ -681,7 +702,7 @@ void Worker::threadMain(void* arg)
 
 void Worker::loop()
 {
-    for (;;)
+    while (!this->stopping)
     {
         Job job;
         bool have = false;
