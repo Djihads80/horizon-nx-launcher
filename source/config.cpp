@@ -109,7 +109,9 @@ void Config::load()
                 instance.name = "Minecraft 26.3";
                 changed       = true;
             }
-            if (instance.icon.empty())
+            // Only when the drawn picture is still there: a folder that replaced it has no "grass",
+            // and an instance wearing a picture that does not exist draws an empty tile.
+            if (instance.icon.empty() && exists(asset("img/icons/grass.png")))
             {
                 instance.icon = "grass";
                 changed       = true;

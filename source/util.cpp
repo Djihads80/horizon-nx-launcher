@@ -128,13 +128,26 @@ bool writeFileAtomic(const std::string& p, const std::string& data)
 {
     std::string tmp = p + ".tmp";
     if (!writeFile(tmp, data))
-        return false;
-    if (::rename(tmp.c_str(), p.c_str()) != 0)
     {
-        ::remove(tmp.c_str());
+        log("save: %s could not be written (card full or write-protected?)", tmp.c_str());
         return false;
     }
-    return true;
+
+    // Rename over the old file where the filesystem allows it, which is what makes this atomic.
+    if (::rename(tmp.c_str(), p.c_str()) == 0)
+        return true;
+
+    // The SD card's filesystem (FatFs) refuses to rename onto an existing name — it answers FR_EXIST
+    // rather than replacing it — so every save after the first one failed and the launcher silently
+    // forgot everything it had written. Take the old file away and try again; only if that fails too
+    // is the write really lost, and then it is written in place.
+    ::remove(p.c_str());
+    if (::rename(tmp.c_str(), p.c_str()) == 0)
+        return true;
+
+    log("save: %s could not be replaced, writing it in place", p.c_str());
+    ::remove(tmp.c_str());
+    return writeFile(p, data);
 }
 
 bool removeTree(const std::string& p)

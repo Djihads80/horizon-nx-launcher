@@ -647,8 +647,7 @@ void InstancesPage::edit(const std::string& instanceId)
                     }));
 
             this->addView(ui::item("Done", "Keep these settings.", [this, id] {
-                this->apply(id);
-                brls::Application::notify("Saved");
+                brls::Application::notify(this->apply(id) ? "Saved" : "The card would not take it");
                 this->leave();
             }));
 
@@ -662,20 +661,21 @@ void InstancesPage::edit(const std::string& instanceId)
                     }));
         }
 
-        /// Writes what the fields hold, without leaving this screen.
-        void apply(const std::string& instanceId)
+        /// Writes what the fields hold, without leaving this screen. False when the card would not
+        /// take it, so the screen can say so instead of claiming it is saved.
+        bool apply(const std::string& instanceId)
         {
             auto& config = Config::get();
             Instance* instance = config.find(instanceId);
             if (!instance)
-                return;
+                return false;
 
             if (name && !trim(name->getValue()).empty())
                 instance->name = trim(name->getValue());
             if (arguments)
                 instance->args = trim(arguments->getValue());
 
-            config.save();
+            return config.save();
         }
 
         /// Leaves this screen and refreshes the pages behind it, once the pop has finished: rebuilding
