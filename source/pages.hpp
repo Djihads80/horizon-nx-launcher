@@ -62,12 +62,11 @@ class InstancesPage : public brls::List
     ~InstancesPage() override;
     void rebuild();
     void refresh();
-    /// Focus the first row: after rebuild() the rows are new objects.
-    void focusFirst();
 
   private:
     void create();
     void edit(const std::string& instanceId);
+    void focusFirst();
     void remove(const std::string& instanceId);
     void select(const std::string& instanceId);
 
@@ -90,6 +89,9 @@ class ModsPage : public brls::List
     void askSearch();
     void install(size_t index);
     void pickWorld();
+    /// Focus the first row: a rebuild replaces them, and a screen whose focused row was deleted
+    /// answers nothing.
+    void focusFirst();
 
     Kind kind = Kind::ResourcePack;
     std::string status = "Pick a kind, then Search.";
@@ -109,6 +111,7 @@ class SettingsPage : public brls::List
   private:
     void switchAccount(int index);
     void signOut();
+    void focusFirst();
 
     AlivePtr alive = std::make_shared<Alive>();
 };

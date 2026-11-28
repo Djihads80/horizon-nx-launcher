@@ -59,6 +59,17 @@ class Field : public brls::InputListItem
     std::function<void(std::string)> changed;
 };
 
+/// Is the focus somewhere inside this page? Asked before a rebuild, which deletes the rows, so the
+/// page can put the focus back on one that exists afterwards: a screen whose focused row was deleted
+/// answers nothing at all.
+bool holdsFocus(brls::View* page)
+{
+    for (brls::View* view = brls::Application::getCurrentFocus(); view; view = view->getParent())
+        if (view == page)
+            return true;
+    return false;
+}
+
 /// What the game download is doing. The transfer runs on the worker, so these are the only things it
 /// touches: a percentage and whether it is still going. The page reads them while it draws.
 std::atomic<bool> installing { false };
@@ -660,6 +671,7 @@ void InstancesPage::refresh()
 
 void InstancesPage::rebuild()
 {
+    const bool hadFocus = holdsFocus(this);
     log("page: instances");
     this->rows.clear();
     this->clear();
@@ -684,6 +696,9 @@ void InstancesPage::rebuild()
 
     this->addView(ui::item("New instance…", "Another way to play, with its own folder.",
         [this] { this->create(); }));
+
+    if (hadFocus)
+        this->focusFirst();
 }
 
 void InstancesPage::create()
@@ -914,6 +929,7 @@ ModsPage::~ModsPage() { this->alive->flag = false; }
 
 void ModsPage::rebuild()
 {
+    const bool hadFocus = holdsFocus(this);
     log("page: mods");
     this->clear();
     auto& config = Config::get();
@@ -996,6 +1012,9 @@ void ModsPage::rebuild()
     this->addView(ui::text("Downloads are checked against Modrinth's SHA-512 before they are "
                            "installed.",
         true, 16));
+
+    if (hadFocus)
+        this->focusFirst();
 }
 
 void ModsPage::askSearch()
@@ -1005,6 +1024,16 @@ void ModsPage::askSearch()
             if (!trim(words).empty())
                 this->runSearch(trim(words));
         });
+}
+
+void ModsPage::focusFirst()
+{
+    for (size_t i = 0; i < this->getViewsCount(); i++)
+        if (brls::View* focus = this->getChild(i)->getDefaultFocus())
+        {
+            brls::Application::giveFocus(focus);
+            return;
+        }
 }
 
 void ModsPage::runSearch(const std::string& words)
@@ -1098,8 +1127,19 @@ SettingsPage::SettingsPage()
 
 SettingsPage::~SettingsPage() { this->alive->flag = false; }
 
+void SettingsPage::focusFirst()
+{
+    for (size_t i = 0; i < this->getViewsCount(); i++)
+        if (brls::View* focus = this->getChild(i)->getDefaultFocus())
+        {
+            brls::Application::giveFocus(focus);
+            return;
+        }
+}
+
 void SettingsPage::rebuild()
 {
+    const bool hadFocus = holdsFocus(this);
     log("page: settings");
     this->clear();
     auto& config = Config::get();
@@ -1204,6 +1244,9 @@ void SettingsPage::rebuild()
                            "Files live in " +
             root() + ".",
         true, 18));
+
+    if (hadFocus)
+        this->focusFirst();
 }
 
 void SettingsPage::switchAccount(int index)
